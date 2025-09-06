@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build": "esbuild src/background.ts --bundle --outdir=dist --format=esm && esbuild src/content.ts --bundle --outdir=dist --format=esm && esbuild src/inpage.ts --bundle --outdir=dist --format=iife --global-name=InpageBundle",
+    "dev": "npm run build -- --sourcemap=inline --watch"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -28,6 +28,7 @@
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "esbuild": "^0.23.0"
   }
 }
