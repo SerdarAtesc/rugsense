@@ -10,6 +10,14 @@ var InpageBundle = (() => {
     console.log("[Aegis/inpage] init", location.href);
     let trackedAddresses = [];
     let recentTransactions = [];
+    const verificationCache = /* @__PURE__ */ new Map();
+    const pendingRequests = /* @__PURE__ */ new Set();
+    const securityAnalysisCache = /* @__PURE__ */ new Map();
+    const lastAIRequest = /* @__PURE__ */ new Map();
+    let lastAIRequestTime = 0;
+    const AI_REQUEST_COOLDOWN = 3e4;
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 3;
     window.toggleAegisDropdown = () => {
       const dropdown = document.getElementById("aegis-dropdown");
       if (dropdown) {
@@ -67,18 +75,284 @@ var InpageBundle = (() => {
     }
     async function checkContractVerification(contractAddress) {
       try {
-        const response = await fetch(`https://api-sepolia.etherscan.io/api?module=contract&action=getsourcecode&address=${contractAddress}&apikey=YourApiKey`);
+        const cacheKey2 = contractAddress.toLowerCase();
+        const cached = verificationCache.get(cacheKey2);
+        if (cached && Date.now() - cached.timestamp < 3e5) {
+          console.log(`[Aegis/inpage] Using cached verification for ${contractAddress}`);
+          return cached.result;
+        }
+        if (pendingRequests.has(cacheKey2)) {
+          console.log(`[Aegis/inpage] Request already pending for ${contractAddress}, waiting...`);
+          return new Promise((resolve) => {
+            const checkPending = () => {
+              if (!pendingRequests.has(cacheKey2)) {
+                const cached2 = verificationCache.get(cacheKey2);
+                if (cached2) {
+                  resolve(cached2.result);
+                } else {
+                  resolve({ isVerified: false, network: "unknown" });
+                }
+              } else {
+                setTimeout(checkPending, 100);
+              }
+            };
+            checkPending();
+          });
+        }
+        pendingRequests.add(cacheKey2);
+        console.log(`[Aegis/inpage] Starting verification check for ${contractAddress}`);
+        let apiUrl = "";
+        let network = "unknown";
+        if (window.ethereum) {
+          try {
+            const chainId = await window.ethereum.request({ method: "eth_chainId" });
+            const chainIdNum = parseInt(chainId, 16);
+            switch (chainIdNum) {
+              case 1:
+                apiUrl = "https://api.etherscan.io/api";
+                network = "mainnet";
+                break;
+              case 11155111:
+                apiUrl = "https://api-sepolia.etherscan.io/api";
+                network = "sepolia";
+                break;
+              case 5:
+                apiUrl = "https://api-goerli.etherscan.io/api";
+                network = "goerli";
+                break;
+              case 137:
+                apiUrl = "https://api.polygonscan.com/api";
+                network = "polygon";
+                break;
+              case 56:
+                apiUrl = "https://api.bscscan.com/api";
+                network = "bsc";
+                break;
+              default:
+                apiUrl = "https://api.etherscan.io/api";
+                network = "mainnet";
+            }
+          } catch (e) {
+            apiUrl = "https://api.etherscan.io/api";
+            network = "mainnet";
+          }
+        } else {
+          apiUrl = "https://api.etherscan.io/api";
+          network = "mainnet";
+        }
+        console.log(`[Aegis/inpage] Checking contract verification on ${network}:`, contractAddress);
+        const response = await fetch(`${apiUrl}?module=contract&action=getsourcecode&address=${contractAddress}&apikey=UAPHPG82Y8VXRRF8XKQPXBTEFJCHGR5VUD`);
         const data = await response.json();
         if (data.status === "1" && data.result && data.result[0]) {
           const contractInfo = data.result[0];
-          const isVerified = contractInfo.SourceCode && contractInfo.SourceCode !== "";
-          console.log(`[Aegis/inpage] Contract ${contractAddress} verification status:`, isVerified);
-          return isVerified;
+          let isVerified = false;
+          let sourceCode = contractInfo.SourceCode || "";
+          if (sourceCode && sourceCode !== "") {
+            if (sourceCode.length > 10) {
+              isVerified = true;
+            }
+            if (sourceCode.startsWith("{")) {
+              try {
+                const parsed = JSON.parse(sourceCode);
+                if (parsed.sources && Object.keys(parsed.sources).length > 0) {
+                  isVerified = true;
+                }
+              } catch (e) {
+                isVerified = sourceCode.length > 10;
+              }
+            }
+          }
+          console.log(`[Aegis/inpage] Source code check:`, {
+            hasSourceCode: !!sourceCode,
+            sourceCodeLength: sourceCode.length,
+            sourceCodePreview: sourceCode.substring(0, 100),
+            isVerified
+          });
+          if (sourceCode && sourceCode.length > 0) {
+            console.log(`[Aegis/inpage] ===== SOURCE CODE FOR ${contractAddress} =====`);
+            console.log(sourceCode);
+            console.log(`[Aegis/inpage] ===== END SOURCE CODE =====`);
+            console.log(`[Aegis/inpage] AI analysis will be performed only for tracked address transactions`);
+          }
+          const result = {
+            isVerified,
+            contractName: contractInfo.ContractName || "Unknown",
+            compilerVersion: contractInfo.CompilerVersion || "Unknown",
+            sourceCode,
+            abi: contractInfo.ABI || "",
+            network
+          };
+          console.log(`[Aegis/inpage] Contract verification result:`, result);
+          verificationCache.set(cacheKey2, {
+            result,
+            timestamp: Date.now()
+          });
+          pendingRequests.delete(cacheKey2);
+          return result;
         }
-        return false;
+        const fallbackResult = {
+          isVerified: false,
+          network
+        };
+        verificationCache.set(cacheKey2, {
+          result: fallbackResult,
+          timestamp: Date.now()
+        });
+        pendingRequests.delete(cacheKey2);
+        return fallbackResult;
       } catch (e) {
         console.error("[Aegis/inpage] Contract verification check error:", e);
-        return false;
+        const errorResult = {
+          isVerified: false,
+          network: "unknown"
+        };
+        pendingRequests.delete(cacheKey);
+        return errorResult;
+      }
+    }
+    function getPatternBasedAnalysis(sourceCode) {
+      let riskLevel = "LOW";
+      const issues = [];
+      const recommendations = [];
+      if (sourceCode.includes("call(") || sourceCode.includes("delegatecall(")) {
+        issues.push("External call detected - potential reentrancy risk");
+        riskLevel = "HIGH";
+        recommendations.push("Use checks-effects-interactions pattern");
+        recommendations.push("Implement reentrancy guards");
+      }
+      if (sourceCode.includes("selfdestruct(") || sourceCode.includes("suicide(")) {
+        issues.push("Self-destruct function detected - high risk");
+        riskLevel = "CRITICAL";
+        recommendations.push("Avoid self-destruct unless absolutely necessary");
+        recommendations.push("Implement proper access controls");
+      }
+      if (sourceCode.includes("assembly")) {
+        issues.push("Assembly code detected - requires careful review");
+        if (riskLevel === "LOW") riskLevel = "MEDIUM";
+        recommendations.push("Review assembly code thoroughly");
+        recommendations.push("Consider using higher-level Solidity");
+      }
+      if (sourceCode.includes("delegatecall(")) {
+        issues.push("Delegatecall detected - high risk of proxy attacks");
+        riskLevel = "HIGH";
+        recommendations.push("Validate delegatecall targets");
+        recommendations.push("Use proxy patterns carefully");
+      }
+      if (sourceCode.includes("tx.origin")) {
+        issues.push("tx.origin usage detected - potential phishing risk");
+        if (riskLevel === "LOW") riskLevel = "MEDIUM";
+        recommendations.push("Use msg.sender instead of tx.origin");
+      }
+      if (sourceCode.includes("block.timestamp")) {
+        issues.push("Block timestamp usage detected - potential manipulation risk");
+        if (riskLevel === "LOW") riskLevel = "MEDIUM";
+        recommendations.push("Be cautious with block.timestamp dependencies");
+      }
+      if (sourceCode.includes("transfer(") && !sourceCode.includes("require(")) {
+        issues.push("Unchecked transfer calls detected");
+        if (riskLevel === "LOW") riskLevel = "MEDIUM";
+        recommendations.push("Check transfer return values");
+      }
+      if (sourceCode.includes("+") || sourceCode.includes("-") || sourceCode.includes("*") || sourceCode.includes("/")) {
+        if (!sourceCode.includes("SafeMath") && !sourceCode.includes("unchecked")) {
+          issues.push("Arithmetic operations without SafeMath - potential overflow risk");
+          if (riskLevel === "LOW") riskLevel = "MEDIUM";
+          recommendations.push("Use SafeMath or Solidity 0.8+ built-in checks");
+        }
+      }
+      if (sourceCode.includes("onlyOwner") || sourceCode.includes("onlyAdmin")) {
+        if (!sourceCode.includes("modifier") && !sourceCode.includes("require")) {
+          issues.push("Access control functions without proper modifiers");
+          if (riskLevel === "LOW") riskLevel = "MEDIUM";
+          recommendations.push("Implement proper access control modifiers");
+        }
+      }
+      if (sourceCode.includes("for(") || sourceCode.includes("while(")) {
+        issues.push("Loop detected - potential gas limit issues");
+        if (riskLevel === "LOW") riskLevel = "MEDIUM";
+        recommendations.push("Consider gas limits in loops");
+        recommendations.push("Use pagination for large datasets");
+      }
+      if (recommendations.length === 0) {
+        recommendations.push("Review contract source code manually");
+        recommendations.push("Check for recent security audits");
+        recommendations.push("Verify contract functionality");
+        recommendations.push("Start with small test amounts");
+      }
+      return {
+        riskLevel,
+        issues: issues.length > 0 ? issues : ["No obvious security patterns detected"],
+        summary: `Pattern-based security analysis completed. Risk level: ${riskLevel}. ${issues.length} potential issues found.`,
+        recommendations
+      };
+    }
+    async function analyzeContractSecurity(contractAddress, sourceCode) {
+      try {
+        const cacheKey2 = `security_${contractAddress.toLowerCase()}`;
+        const cached = securityAnalysisCache.get(cacheKey2);
+        if (cached && Date.now() - cached.timestamp < 72e5) {
+          console.log(`[Aegis/inpage] Using cached security analysis for ${contractAddress}`);
+          return cached.result;
+        }
+        const now = Date.now();
+        if (now - lastAIRequestTime < AI_REQUEST_COOLDOWN) {
+          console.log(`[Aegis/inpage] Rate limit: Too many AI requests, using fallback analysis`);
+          return {
+            riskLevel: "MEDIUM",
+            issues: ["AI analysis rate limited - manual review recommended"],
+            summary: "Rate limited: Unable to perform AI analysis. Manual code review recommended.",
+            recommendations: [
+              "Review contract source code manually",
+              "Check for known security patterns",
+              "Verify contract functionality",
+              "Start with small test amounts"
+            ]
+          };
+        }
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          console.log(`[Aegis/inpage] Too many consecutive failures (${consecutiveFailures}), using fallback analysis`);
+          return {
+            riskLevel: "MEDIUM",
+            issues: ["AI analysis temporarily disabled due to failures"],
+            summary: "AI analysis disabled: Multiple consecutive failures detected.",
+            recommendations: [
+              "Review contract source code manually",
+              "Check for known security patterns",
+              "Verify contract functionality",
+              "Start with small test amounts"
+            ]
+          };
+        }
+        lastAIRequestTime = now;
+        console.log(`[Aegis/inpage] Starting AI security analysis for ${contractAddress}`);
+        const analysisPrompt = `
+Analyze this Solidity smart contract for security vulnerabilities and risks. Provide a JSON response with the following structure:
+
+{
+  "riskLevel": "LOW|MEDIUM|HIGH|CRITICAL",
+  "issues": ["list of specific security issues found"],
+  "summary": "brief summary of the contract's security status",
+  "recommendations": ["list of security recommendations"]
+}
+
+Focus on:
+- Reentrancy attacks
+- Integer overflow/underflow
+- Access control issues
+- External calls
+- Gas limit issues
+- Front-running vulnerabilities
+- Logic errors
+- Unchecked external calls
+
+Contract Source Code:
+${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
+`;
+        console.log(`[Aegis/inpage] Using pattern-based analysis for ${contractAddress} (AI disabled due to timeout issues)`);
+        return getPatternBasedAnalysis(sourceCode);
+      } catch (error) {
+        console.error(`[Aegis/inpage] Pattern-based analysis error:`, error);
+        return getPatternBasedAnalysis(sourceCode);
       }
     }
     function short(a) {
@@ -199,12 +473,66 @@ var InpageBundle = (() => {
                           methodDetails = `Unknown method (${methodSig})`;
                         }
                       }
+                      let verificationInfo = "";
+                      if (to && data) {
+                        checkContractVerification(to).then((verificationResult) => {
+                          const contractStatus = verificationResult.isVerified ? `\u2705 Verified (${verificationResult.contractName || "Unknown"})` : `\u274C UNVERIFIED - Source code not available`;
+                          const networkInfo = verificationResult.network ? ` | Network: ${verificationResult.network}` : "";
+                          if (verificationResult.isVerified && verificationResult.sourceCode && (isTrackedFrom || isTrackedTo)) {
+                            console.log(`[Aegis/inpage] Running AI analysis for tracked address transaction`);
+                            analyzeContractSecurity(to, verificationResult.sourceCode).then((securityResult) => {
+                              const riskColor = securityResult.riskLevel === "CRITICAL" ? "#ef4444" : securityResult.riskLevel === "HIGH" ? "#f97316" : securityResult.riskLevel === "MEDIUM" ? "#eab308" : "#22c55e";
+                              const alertDetailsEl = document.getElementById("aegis-alert-details");
+                              if (alertDetailsEl) {
+                                alertDetailsEl.innerHTML = `
+                                <div style="margin-bottom: 8px;"><strong>\u{1F50D} Direction:</strong> ${isTrackedFrom ? "FROM" : "TO"} tracked address</div>
+                                <div style="margin-bottom: 8px;"><strong>\u{1F464} Tracked Address:</strong> ${fromLower || toLower}</div>
+                                <div style="margin-bottom: 8px;"><strong>\u{1F4C4} Contract Address:</strong> ${to || "N/A"}</div>
+                                <div style="margin-bottom: 8px;"><strong>\u26A1 Transaction Type:</strong> ${alertTxType}</div>
+                                ${methodDetails ? `<div style="margin-bottom: 8px;"><strong>\u{1F527} Method:</strong> ${methodDetails}</div>` : ""}
+                                <div style="margin-bottom: 8px;"><strong>\u{1F512} Contract Status:</strong> ${contractStatus}${networkInfo}</div>
+                                <div style="margin-bottom: 8px;"><strong>\u{1F6E1}\uFE0F Security Risk:</strong> <span style="color: ${riskColor}; font-weight: bold;">${securityResult.riskLevel}</span></div>
+                                <div style="margin-bottom: 8px;"><strong>\u23F0 Time:</strong> ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}</div>
+                                <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
+                                  <strong>\u26A0\uFE0F Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
+                                  ${!verificationResult.isVerified ? "<br><strong>\u{1F6A8} UNVERIFIED CONTRACT:</strong> Source code not available - proceed with extreme caution!" : ""}
+                                  ${securityResult.riskLevel === "CRITICAL" || securityResult.riskLevel === "HIGH" ? `<br><strong>\u{1F6A8} HIGH RISK CONTRACT:</strong> ${securityResult.summary}` : ""}
+                                </div>
+                                <div style="margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 11px;">
+                                  <strong>\u{1F50D} Security Issues:</strong><br>
+                                  ${securityResult.issues.slice(0, 3).map((issue) => `\u2022 ${issue}`).join("<br>")}
+                                  ${securityResult.issues.length > 3 ? `<br>\u2022 ... and ${securityResult.issues.length - 3} more` : ""}
+                                </div>
+                              `;
+                              }
+                            });
+                          } else {
+                            const alertDetailsEl = document.getElementById("aegis-alert-details");
+                            if (alertDetailsEl) {
+                              alertDetailsEl.innerHTML = `
+                              <div style="margin-bottom: 8px;"><strong>\u{1F50D} Direction:</strong> ${isTrackedFrom ? "FROM" : "TO"} tracked address</div>
+                              <div style="margin-bottom: 8px;"><strong>\u{1F464} Tracked Address:</strong> ${fromLower || toLower}</div>
+                              <div style="margin-bottom: 8px;"><strong>\u{1F4C4} Contract Address:</strong> ${to || "N/A"}</div>
+                              <div style="margin-bottom: 8px;"><strong>\u26A1 Transaction Type:</strong> ${alertTxType}</div>
+                              ${methodDetails ? `<div style="margin-bottom: 8px;"><strong>\u{1F527} Method:</strong> ${methodDetails}</div>` : ""}
+                              <div style="margin-bottom: 8px;"><strong>\u{1F512} Contract Status:</strong> ${contractStatus}${networkInfo}</div>
+                              <div style="margin-bottom: 8px;"><strong>\u23F0 Time:</strong> ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}</div>
+                              <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
+                                <strong>\u26A0\uFE0F Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
+                                ${!verificationResult.isVerified ? "<br><strong>\u{1F6A8} UNVERIFIED CONTRACT:</strong> Source code not available - proceed with extreme caution!" : ""}
+                              </div>
+                            `;
+                            }
+                          }
+                        });
+                      }
                       alertDetails.innerHTML = `
                       <div style="margin-bottom: 8px;"><strong>\u{1F50D} Direction:</strong> ${isTrackedFrom ? "FROM" : "TO"} tracked address</div>
                       <div style="margin-bottom: 8px;"><strong>\u{1F464} Tracked Address:</strong> ${fromLower || toLower}</div>
                       <div style="margin-bottom: 8px;"><strong>\u{1F4C4} Contract Address:</strong> ${to || "N/A"}</div>
                       <div style="margin-bottom: 8px;"><strong>\u26A1 Transaction Type:</strong> ${alertTxType}</div>
                       ${methodDetails ? `<div style="margin-bottom: 8px;"><strong>\u{1F527} Method:</strong> ${methodDetails}</div>` : ""}
+                      <div style="margin-bottom: 8px;"><strong>\u{1F512} Contract Status:</strong> \u{1F504} Checking verification...</div>
                       <div style="margin-bottom: 8px;"><strong>\u23F0 Time:</strong> ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}</div>
                       <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
                         <strong>\u26A0\uFE0F Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
@@ -277,21 +605,49 @@ var InpageBundle = (() => {
                 } else {
                   console.log("[Aegis/inpage] Unknown method signature:", methodSig);
                 }
-                checkContractVerification(to).then((isVerified) => {
-                  const tx2 = {
-                    id: txHash,
-                    type: txType,
-                    address: to,
-                    // Contract adresi (doğru)
-                    timestamp: Date.now(),
-                    details: {
-                      method: methodSig,
-                      verified: isVerified,
-                      from
-                      // Wallet adresi de ekle
-                    }
-                  };
-                  addRecentTransaction(tx2);
+                checkContractVerification(to).then((verificationResult) => {
+                  if (verificationResult.isVerified && verificationResult.sourceCode && (isTrackedFrom || isTrackedTo)) {
+                    console.log(`[Aegis/inpage] Running AI analysis for tracked address transaction in recent transactions`);
+                    analyzeContractSecurity(to, verificationResult.sourceCode).then((securityResult) => {
+                      const tx2 = {
+                        id: txHash,
+                        type: txType,
+                        address: to,
+                        // Contract adresi (doğru)
+                        timestamp: Date.now(),
+                        details: {
+                          method: methodSig,
+                          verified: verificationResult.isVerified,
+                          contractName: verificationResult.contractName,
+                          compilerVersion: verificationResult.compilerVersion,
+                          network: verificationResult.network,
+                          securityRisk: securityResult.riskLevel,
+                          securityIssues: securityResult.issues,
+                          from
+                          // Wallet adresi de ekle
+                        }
+                      };
+                      addRecentTransaction(tx2);
+                    });
+                  } else {
+                    const tx2 = {
+                      id: txHash,
+                      type: txType,
+                      address: to,
+                      // Contract adresi (doğru)
+                      timestamp: Date.now(),
+                      details: {
+                        method: methodSig,
+                        verified: verificationResult.isVerified,
+                        contractName: verificationResult.contractName,
+                        compilerVersion: verificationResult.compilerVersion,
+                        network: verificationResult.network,
+                        from
+                        // Wallet adresi de ekle
+                      }
+                    };
+                    addRecentTransaction(tx2);
+                  }
                 });
               }
               return await target.apply(thisArg, argArray);
@@ -829,15 +1185,30 @@ var InpageBundle = (() => {
           const value = parseInt(tx.details.value || "0", 16) / 1e18;
           details = `Value: ${value.toFixed(4)} ETH`;
         } else if (tx.type === "Mint") {
-          details = `Mint to: ${short(tx.details.from)} | Verified: ${tx.details.verified ? "\u2705" : "\u274C"}`;
+          const contractName = tx.details.contractName ? ` (${tx.details.contractName})` : "";
+          const network = tx.details.network ? ` | ${tx.details.network}` : "";
+          const securityRisk = tx.details.securityRisk ? ` | \u{1F6E1}\uFE0F ${tx.details.securityRisk}` : "";
+          details = `Mint to: ${short(tx.details.from)} | ${tx.details.verified ? "\u2705 Verified" : "\u274C UNVERIFIED"}${contractName}${network}${securityRisk}`;
         } else if (tx.type === "Token Transfer") {
-          details = `Transfer | Verified: ${tx.details.verified ? "\u2705" : "\u274C"}`;
+          const contractName = tx.details.contractName ? ` (${tx.details.contractName})` : "";
+          const network = tx.details.network ? ` | ${tx.details.network}` : "";
+          const securityRisk = tx.details.securityRisk ? ` | \u{1F6E1}\uFE0F ${tx.details.securityRisk}` : "";
+          details = `Transfer | ${tx.details.verified ? "\u2705 Verified" : "\u274C UNVERIFIED"}${contractName}${network}${securityRisk}`;
         } else if (tx.type === "Token Approval") {
-          details = `Approval | Verified: ${tx.details.verified ? "\u2705" : "\u274C"}`;
+          const contractName = tx.details.contractName ? ` (${tx.details.contractName})` : "";
+          const network = tx.details.network ? ` | ${tx.details.network}` : "";
+          const securityRisk = tx.details.securityRisk ? ` | \u{1F6E1}\uFE0F ${tx.details.securityRisk}` : "";
+          details = `Approval | ${tx.details.verified ? "\u2705 Verified" : "\u274C UNVERIFIED"}${contractName}${network}${securityRisk}`;
         } else if (tx.type === "Set Approval For All") {
-          details = `Set Approval | Verified: ${tx.details.verified ? "\u2705" : "\u274C"}`;
+          const contractName = tx.details.contractName ? ` (${tx.details.contractName})` : "";
+          const network = tx.details.network ? ` | ${tx.details.network}` : "";
+          const securityRisk = tx.details.securityRisk ? ` | \u{1F6E1}\uFE0F ${tx.details.securityRisk}` : "";
+          details = `Set Approval | ${tx.details.verified ? "\u2705 Verified" : "\u274C UNVERIFIED"}${contractName}${network}${securityRisk}`;
         } else {
-          details = `Method: ${tx.details.method} | Verified: ${tx.details.verified ? "\u2705" : "\u274C"}`;
+          const contractName = tx.details.contractName ? ` (${tx.details.contractName})` : "";
+          const network = tx.details.network ? ` | ${tx.details.network}` : "";
+          const securityRisk = tx.details.securityRisk ? ` | \u{1F6E1}\uFE0F ${tx.details.securityRisk}` : "";
+          details = `Method: ${tx.details.method} | ${tx.details.verified ? "\u2705 Verified" : "\u274C UNVERIFIED"}${contractName}${network}${securityRisk}`;
         }
         return `
                 <div style="margin-bottom: 15px; padding: 15px; background: #1f2937; border-radius: 8px; border-left: 4px solid #4ade80;">
