@@ -1,26 +1,52 @@
 {
-    "manifest_version": 3,
-    "name": "rugsense",
-    "version": "0.1.1",
-    
-    "description": "ERC20/NFT girişlerini ve approve/permit yetkilerini gerçek zamanlı uyarır. (Debug logs)",
-    "action": { "default_title": "Aegis" },
-    "permissions": ["storage", "notifications", "scripting", "activeTab"],
-    "host_permissions": ["https://*/*", "http://*/*"],
-    "background": { "service_worker": "dist/background.js", "type": "module" },
-  "content_scripts": [{
-  "matches": ["<all_urls>"],
-  "js": ["dist/content.js"],
-  "run_at": "document_start",
-  "all_frames": true,
-  "match_about_blank": true
-}],
-    "web_accessible_resources": [
-      { "resources": ["dist/inpage.js"], "matches": ["<all_urls>"] }
-    ],
-    "icons": {
-        "16": "icons/icon16.png",
-        "48": "icons/icon48.png",
-        "128": "icons/icon128.png"
-      }
+  "manifest_version": 3,
+  "name": "rugsense",
+  "version": "0.1.1",
+  "description": "ERC20/NFT girişlerini ve approve/permit yetkilerini gerçek zamanlı uyarır. (Debug logs)",
+  "action": {
+    "default_title": "Rugsense"
+  },
+  "permissions": [
+    "storage",
+    "notifications",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dist/inpage.js",
+        "icons/*.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icons/logo_head.png",
+    "48": "icons/logo_head.png",
+    "128": "icons/logo_head.png"
   }
+}

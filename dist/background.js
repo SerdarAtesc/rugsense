@@ -16490,7 +16490,7 @@ async function ensureClient() {
   const transport = rpcUrl ? rpcUrl.startsWith("wss:") ? webSocket(rpcUrl) : http(rpcUrl) : FALLBACK_WSS ? webSocket(FALLBACK_WSS) : http();
   client = createPublicClient({ chain: sepolia, transport });
   console.log(
-    "[Aegis/bg] client ready on sepolia, transport:",
+    "[Rugsense/bg] client ready on sepolia, transport:",
     rpcUrl || FALLBACK_WSS || "default-http"
   );
   return client;
@@ -16504,12 +16504,12 @@ function badgePing() {
 }
 function notify(title, message) {
   const iconUrl = chrome.runtime.getURL("icons/icon128.png");
-  console.log("[Aegis/bg] notify:", { title, message, iconUrl });
+  console.log("[Rugsense/bg] notify:", { title, message, iconUrl });
   chrome.notifications.create(
     { type: "basic", iconUrl, title, message, priority: 2 },
     () => {
       const err = chrome.runtime.lastError;
-      if (err) console.error("[Aegis/bg] notifications.create error:", err);
+      if (err) console.error("[Rugsense/bg] notifications.create error:", err);
     }
   );
   badgePing();
@@ -16518,42 +16518,50 @@ async function subscribeTransfers() {
   const c = await ensureClient();
   const { addresses } = await getSettings();
   if (!addresses.length) {
-    console.warn("[Aegis/bg] no addresses to watch");
+    console.warn("[Rugsense/bg] no addresses to watch");
     return;
   }
-  globalThis.__aegis_unwatch = globalThis.__aegis_unwatch || [];
-  globalThis.__aegis_unwatch.forEach((fn) => {
+  globalThis.__rugsense_unwatch = globalThis.__rugsense_unwatch || [];
+  globalThis.__rugsense_unwatch.forEach((fn) => {
     try {
       fn?.();
     } catch {
     }
   });
-  globalThis.__aegis_unwatch = [];
+  globalThis.__rugsense_unwatch = [];
   const watched = Array.from(new Set(addresses.map((a) => a.toLowerCase())));
-  console.log("[Aegis/bg] setting watchers for:", watched);
+  console.log("[Rugsense/bg] setting watchers for:", watched);
   for (const toAddr of watched) {
     const unwatch = c.watchEvent({
       event: TRANSFER,
       args: { to: toAddr },
       onLogs: (logs) => {
-        console.log("[Aegis/bg] onLogs(to=", toAddr, ") count:", logs.length);
+        console.log(
+          "[Rugsense/bg] onLogs(to=",
+          toAddr,
+          ") count:",
+          logs.length
+        );
         logs.forEach((log) => {
           const from14 = String(log.args?.from || "");
           const value = log.args?.value;
           notify(
             "Token Received",
-            `~${formatUnits(value, 18)} tokens from ${from14.slice(0, 6)}\u2026${from14.slice(-4)}`
+            `~${formatUnits(value, 18)} tokens from ${from14.slice(
+              0,
+              6
+            )}\u2026${from14.slice(-4)}`
           );
         });
       },
-      onError: (e) => console.error("[Aegis/bg] watchEvent error for", toAddr, e)
+      onError: (e) => console.error("[Rugsense/bg] watchEvent error for", toAddr, e)
     });
-    globalThis.__aegis_unwatch.push(unwatch);
+    globalThis.__rugsense_unwatch.push(unwatch);
   }
 }
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  console.log("[Aegis/bg] onMessage:", msg);
-  if (msg?.type === "Aegis/ProgrammaticInject") {
+  console.log("[Rugsense/bg] onMessage:", msg);
+  if (msg?.type === "Rugsense/ProgrammaticInject") {
     const tabId = sender.tab?.id;
     const frameId = sender.frameId;
     if (tabId !== void 0) {
@@ -16566,67 +16574,87 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         },
         () => {
           const err = chrome.runtime.lastError;
-          if (err) console.error("[Aegis/bg] executeScript error:", err);
-          else console.log("[Aegis/bg] inpage injected via scripting", { tabId, frameId });
+          if (err) console.error("[Rugsense/bg] executeScript error:", err);
+          else
+            console.log("[Rugsense/bg] inpage injected via scripting", {
+              tabId,
+              frameId
+            });
           sendResponse({ ok: !err });
         }
       );
       return true;
     } else {
-      console.warn("[Aegis/bg] ProgrammaticInject: no tabId");
+      console.warn("[Rugsense/bg] ProgrammaticInject: no tabId");
       sendResponse({ ok: false });
       return;
     }
   }
-  if (msg?.type === "Aegis/AddAddress") {
+  if (msg?.type === "Rugsense/AddAddress") {
     const addr = String(msg.address).toLowerCase();
     chrome.storage.local.get({ addresses: [] }, (res) => {
       const set = new Set(res.addresses);
       set.add(addr);
       chrome.storage.local.set({ addresses: [...set] }, () => {
-        notify("Aegis", `Monitoring ${addr}`);
+        notify("Rugsense", `Monitoring ${addr}`);
         subscribeTransfers();
         sendResponse({ ok: true });
       });
     });
     return true;
   }
-  if (msg?.type === "Aegis/Notify") {
+  if (msg?.type === "Rugsense/Notify") {
     const { title, body } = msg.payload || {};
-    notify(title || "Aegis", body || "Event detected");
+    notify(title || "Rugsense", body || "Event detected");
   }
 });
 chrome.action.onClicked.addListener((tab) => {
   if (tab.id && tab.url) {
     if (tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") || tab.url.startsWith("moz-extension://")) {
-      console.log("[Aegis/bg] Cannot inject into internal page:", tab.url);
+      console.log("[Rugsense/bg] Cannot inject into internal page:", tab.url);
       return;
     }
-    console.log("[Aegis/bg] Extension icon clicked, sending toggle message");
-    chrome.tabs.sendMessage(tab.id, { type: "Rugsense/ToggleDropdown" }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.log("[Aegis/bg] Content script not ready, injecting...");
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ["dist/content.js"]
-        }).then(() => {
-          console.log("[Aegis/bg] Content script injected successfully");
-          setTimeout(() => {
-            chrome.tabs.sendMessage(tab.id, { type: "Rugsense/ToggleDropdown" }, (response2) => {
-              if (chrome.runtime.lastError) {
-                console.log("[Aegis/bg] Still can't reach content script:", chrome.runtime.lastError.message);
-              } else {
-                console.log("[Aegis/bg] Toggle message sent after injection");
-              }
-            });
-          }, 200);
-        }).catch((error) => {
-          console.log("[Aegis/bg] Failed to inject content script:", error);
-        });
-      } else {
-        console.log("[Aegis/bg] Toggle message sent successfully");
+    console.log("[Rugsense/bg] Extension icon clicked, sending toggle message");
+    chrome.tabs.sendMessage(
+      tab.id,
+      { type: "Rugsense/ToggleDropdown" },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.log("[Rugsense/bg] Content script not ready, injecting...");
+          chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["dist/content.js"]
+          }).then(() => {
+            console.log("[Rugsense/bg] Content script injected successfully");
+            setTimeout(() => {
+              chrome.tabs.sendMessage(
+                tab.id,
+                { type: "Rugsense/ToggleDropdown" },
+                (response2) => {
+                  if (chrome.runtime.lastError) {
+                    console.log(
+                      "[Rugsense/bg] Still can't reach content script:",
+                      chrome.runtime.lastError.message
+                    );
+                  } else {
+                    console.log(
+                      "[Rugsense/bg] Toggle message sent after injection"
+                    );
+                  }
+                }
+              );
+            }, 200);
+          }).catch((error) => {
+            console.log(
+              "[Rugsense/bg] Failed to inject content script:",
+              error
+            );
+          });
+        } else {
+          console.log("[Rugsense/bg] Toggle message sent successfully");
+        }
       }
-    });
+    );
   }
 });
 subscribeTransfers();

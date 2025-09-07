@@ -1,6 +1,4 @@
 // src/inpage.ts
-import { Aptos, AptosConfig, Network } from '@aptos-labs/ts-sdk';
-
 (() => {
   // Duplicate injection kontrolü
   if ((window as any).__RUGSENSE_INPAGE_LOADED) {
@@ -26,6 +24,7 @@ import { Aptos, AptosConfig, Network } from '@aptos-labs/ts-sdk';
     return path;
   }
 
+  // Değişkenleri en başta tanımla
   let trackedAddresses: string[] = [];
   let recentTransactions: Array<{
     type: string;
@@ -47,228 +46,6 @@ import { Aptos, AptosConfig, Network } from '@aptos-labs/ts-sdk';
   const AI_REQUEST_COOLDOWN = 30000; // 30 saniye bekle
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
-
-  // Aptos Blockchain Integration
-  const APTOS_CONTRACT_ADDRESS =
-    '0x35b28662b4657b901cb36a37af124cc4d9eb067d654ad9ca68e9aedd376be5cf';
-  const APTOS_NETWORK = 'testnet';
-  let aptosClient: any = null;
-  let aptosWallet: any = null;
-  let connectedWalletAddress: string | null = null;
-
-  // Wallet storage fonksiyonları
-  function saveWalletAddress(address: string) {
-    localStorage.setItem('rugsense_aptos_wallet', address);
-    connectedWalletAddress = address;
-    console.log(`[Rugsense/Aptos] Wallet address saved: ${address}`);
-  }
-
-  function loadWalletAddress(): string | null {
-    const saved = localStorage.getItem('rugsense_aptos_wallet');
-    if (saved) {
-      connectedWalletAddress = saved;
-      console.log(`[Rugsense/Aptos] Wallet address loaded: ${saved}`);
-    }
-    return saved;
-  }
-
-  function clearWalletAddress() {
-    localStorage.removeItem('rugsense_aptos_wallet');
-    connectedWalletAddress = null;
-    console.log(`[Rugsense/Aptos] Wallet address cleared`);
-  }
-
-  // Sayfa yüklendiğinde wallet'ı kontrol et
-  loadWalletAddress();
-
-  // Aptos SDK'yı initialize et (NPM'den import edilen)
-  async function initializeAptosClient() {
-    try {
-      console.log('[Rugsense/Aptos] Initializing Aptos client from NPM...');
-
-      // NPM'den import edilen SDK'yı kullan
-      const config = new AptosConfig({ network: Network.TESTNET });
-      aptosClient = new Aptos(config);
-      console.log('[Rugsense/Aptos] Client initialized successfully from NPM');
-    } catch (error) {
-      console.error('[Rugsense/Aptos] Error initializing client:', error);
-      aptosClient = 'wallet_only';
-      console.log('[Rugsense/Aptos] Falling back to wallet-only mode');
-    }
-  }
-
-  // SDK'yı initialize et
-  initializeAptosClient();
-
-  // Contract hash hesaplama
-  async function calculateContractHash(
-    contractAddress: string
-  ): Promise<string> {
-    try {
-      // Basit hash hesaplama (gerçek uygulamada daha karmaşık olabilir)
-      const encoder = new TextEncoder();
-      const data = encoder.encode(contractAddress + Date.now().toString());
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    } catch (error) {
-      console.error('[Rugsense/Aptos] Error calculating hash:', error);
-      return contractAddress.replace('0x', '').toLowerCase();
-    }
-  }
-
-  // Blockchain'de daha önce analiz edilip edilmediğini kontrol et
-  async function checkBlockchainCache(
-    contractAddress: string
-  ): Promise<boolean> {
-    try {
-      const contractHash = await calculateContractHash(contractAddress);
-      console.log(
-        `[Rugsense/Aptos] Checking blockchain cache for contract: ${contractAddress} (hash: ${contractHash})`
-      );
-
-      // Şimdilik her zaman false döndür (henüz wallet connection yok)
-      // Gerçek implementasyonda Aptos contract'ından kontrol edilecek
-      return false;
-    } catch (error) {
-      console.error('[Rugsense/Aptos] Error checking blockchain cache:', error);
-      return false;
-    }
-  }
-
-  // Blockchain'e analysis gönder
-  async function submitAnalysisToBlockchain(
-    contractAddress: string,
-    analysisResult: any
-  ) {
-    try {
-      // Önce blockchain cache'de kontrol et
-      const alreadyAnalyzed = await checkBlockchainCache(contractAddress);
-      if (alreadyAnalyzed) {
-        console.log(
-          `[Rugsense/Aptos] Contract already analyzed on blockchain: ${contractAddress}`
-        );
-        return {
-          contractHash: await calculateContractHash(contractAddress),
-          status: 'already_analyzed',
-          message: 'Contract already analyzed on blockchain',
-        };
-      }
-
-      if (!aptosClient && !connectedWalletAddress) {
-        console.log(
-          '[Rugsense/Aptos] No client or wallet, skipping blockchain submission'
-        );
-        return null;
-      }
-
-      const contractHash = await calculateContractHash(contractAddress);
-
-      // Verileri kısalt
-      const shortSummary = 'Test'; // Minimal data
-
-      // Contract ID'yi string olarak kullan
-      const contractId = contractAddress; // Contract address'i ID olarak kullan
-
-      // Transaction payload'ı wallet format'ına çevir
-      const payload = {
-        type: 'entry_function_payload',
-        function: `${APTOS_CONTRACT_ADDRESS}::AnalysisRegistry::submit_analysis`,
-        arguments: [
-          contractId, // String format
-          'LOW', // String format
-          'Test', // String format
-        ],
-        type_arguments: [],
-        max_gas_amount: '100000000',
-        gas_unit_price: '100',
-        expiration_timestamp_secs: Math.floor(Date.now() / 1000) + 1800000, // 30 dakika sonra expire
-      };
-
-      console.log('[Rugsense/Aptos] Submitting to blockchain:', payload);
-
-      // Gerçek blockchain transaction yap
-      try {
-        // Tüm wallet'ları kontrol et
-        let aptosWallet = null;
-        if (typeof window !== 'undefined') {
-          if ((window as any).aptos) {
-            aptosWallet = (window as any).aptos; // Petra
-            console.log('[Rugsense/Aptos] Using Petra wallet for transaction');
-          } else if ((window as any).martian) {
-            aptosWallet = (window as any).martian; // Martian
-            console.log(
-              '[Rugsense/Aptos] Using Martian wallet for transaction'
-            );
-          } else if ((window as any).pontem) {
-            aptosWallet = (window as any).pontem; // Pontem
-            console.log('[Rugsense/Aptos] Using Pontem wallet for transaction');
-          } else if ((window as any).fewcha) {
-            aptosWallet = (window as any).fewcha; // Fewcha
-            console.log('[Rugsense/Aptos] Using Fewcha wallet for transaction');
-          } else if ((window as any).rise) {
-            aptosWallet = (window as any).rise; // Rise
-            console.log('[Rugsense/Aptos] Using Rise wallet for transaction');
-          }
-        }
-
-        if (aptosWallet && connectedWalletAddress) {
-          console.log(
-            '[Rugsense/Aptos] Submitting transaction with wallet:',
-            connectedWalletAddress
-          );
-          console.log('[Rugsense/Aptos] Transaction payload:', payload);
-
-          // Direkt analysis transaction'ını gönder
-          console.log(
-            '[Rugsense/Aptos] Sending analysis transaction directly...'
-          );
-          const txHash = await aptosWallet.signAndSubmitTransaction(payload);
-          console.log(
-            '[Rugsense/Aptos] Analysis transaction submitted successfully:',
-            txHash
-          );
-
-          return {
-            contractHash,
-            rewardAmount: '0.01 APT (testnet)',
-            status: 'submitted',
-            transactionHash: txHash,
-          };
-        } else {
-          // Wallet yoksa sadece log'la
-          console.log(
-            '[Rugsense/Aptos] Wallet not connected, analysis ready for submission:',
-            {
-              contractHash,
-              riskLevel: analysisResult.riskLevel,
-              rewardAmount: '0.01 APT (testnet)',
-            }
-          );
-
-          return {
-            contractHash,
-            rewardAmount: '0.01 APT (testnet)',
-            status: 'ready_for_wallet',
-          };
-        }
-      } catch (walletError) {
-        console.error(
-          '[Rugsense/Aptos] Wallet transaction error:',
-          walletError
-        );
-        return {
-          contractHash,
-          rewardAmount: '0.01 APT (testnet)',
-          status: 'wallet_error',
-          error: walletError.message,
-        };
-      }
-    } catch (error) {
-      console.error('[Rugsense/Aptos] Error submitting to blockchain:', error);
-      return null;
-    }
-  }
 
   // Global toggle fonksiyonunu hemen tanımla
   (window as any).toggleRugsenseDropdown = () => {
@@ -564,7 +341,7 @@ import { Aptos, AptosConfig, Network } from '@aptos-labs/ts-sdk';
       };
 
       // Pending request'i temizle
-      pendingRequests.delete(cacheKey);
+      pendingRequests.delete(contractAddress.toLowerCase());
 
       return errorResult;
     }
@@ -709,58 +486,6 @@ import { Aptos, AptosConfig, Network } from '@aptos-labs/ts-sdk';
         return cached.result;
       }
 
-      // Source code yoksa basic analysis yap
-      if (!sourceCode || sourceCode.trim() === '') {
-        console.log(
-          `[Rugsense/inpage] No source code available for ${contractAddress}, running basic analysis`
-        );
-        const basicAnalysis = {
-          riskLevel: 'MEDIUM' as const,
-          issues: [
-            'Contract source code not available',
-            'Unable to perform detailed security analysis',
-          ],
-          summary:
-            'Contract is unverified - source code not available for analysis',
-          recommendations: [
-            'Verify contract source code on Etherscan',
-            'Review contract bytecode manually',
-            'Start with small test amounts',
-            'Check contract on multiple block explorers',
-          ],
-        };
-
-        // Cache'e kaydet
-        securityAnalysisCache.set(cacheKey, {
-          result: basicAnalysis,
-          timestamp: Date.now(),
-        });
-
-        // Blockchain'e gönder (source code yoksa da)
-        console.log(
-          `[Rugsense/Aptos] No source code, submitting basic analysis to blockchain: ${contractAddress}`
-        );
-        console.log(
-          `[Rugsense/Aptos] DEBUG - Wallet connected: ${!!connectedWalletAddress}, Address: ${connectedWalletAddress}`
-        );
-        const blockchainResult = await submitAnalysisToBlockchain(
-          contractAddress,
-          basicAnalysis
-        );
-        if (blockchainResult) {
-          console.log(
-            `[Rugsense/Aptos] Blockchain submission result (no source):`,
-            blockchainResult
-          );
-        } else {
-          console.log(
-            `[Rugsense/Aptos] Blockchain submission failed (no source)`
-          );
-        }
-
-        return basicAnalysis;
-      }
-
       // Rate limiting kontrolü
       const now = Date.now();
       if (now - lastAIRequestTime < AI_REQUEST_COOLDOWN) {
@@ -837,77 +562,10 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       );
 
       // Pattern-based analysis döndür
-      const analysisResult = getPatternBasedAnalysis(sourceCode);
-
-      // Blockchain'e gönder (tracked address ise)
-      console.log(
-        `[Rugsense/Aptos] DEBUG - Contract address: ${contractAddress}`
-      );
-      console.log(
-        `[Rugsense/Aptos] DEBUG - Tracked addresses:`,
-        trackedAddresses
-      );
-      console.log(
-        `[Rugsense/Aptos] DEBUG - Is tracked:`,
-        trackedAddresses.includes(contractAddress.toLowerCase())
-      );
-
-      // Tracked wallet'dan transaction varsa, contract'ı blockchain'e gönder
-      // Contract'ı track etmiyoruz, sadece analiz ediyoruz
-      // Blockchain'e gönder (tracked address ise)
-      console.log(
-        `[Rugsense/Aptos] Tracked wallet transaction detected, submitting contract analysis to blockchain: ${contractAddress}`
-      );
-      console.log(
-        `[Rugsense/Aptos] DEBUG - Wallet connected: ${!!connectedWalletAddress}, Address: ${connectedWalletAddress}`
-      );
-      const blockchainResult = await submitAnalysisToBlockchain(
-        contractAddress,
-        analysisResult
-      );
-      if (blockchainResult) {
-        console.log(
-          `[Rugsense/Aptos] Blockchain submission result:`,
-          blockchainResult
-        );
-      } else {
-        console.log(`[Rugsense/Aptos] Blockchain submission failed`);
-      }
-
-      return analysisResult;
+      return getPatternBasedAnalysis(sourceCode);
     } catch (error) {
       console.error(`[Rugsense/inpage] Pattern-based analysis error:`, error);
-      const analysisResult = getPatternBasedAnalysis(sourceCode);
-
-      // Blockchain'e gönder (tracked address ise)
-      console.log(
-        `[Rugsense/Aptos] DEBUG (catch) - Contract address: ${contractAddress}`
-      );
-      console.log(
-        `[Rugsense/Aptos] DEBUG (catch) - Tracked addresses:`,
-        trackedAddresses
-      );
-      console.log(
-        `[Rugsense/Aptos] DEBUG (catch) - Is tracked:`,
-        trackedAddresses.includes(contractAddress.toLowerCase())
-      );
-
-      // Tracked wallet'dan transaction varsa, contract'ı blockchain'e gönder
-      console.log(
-        `[Rugsense/Aptos] Tracked wallet transaction detected (catch), submitting contract analysis to blockchain: ${contractAddress}`
-      );
-      const blockchainResult = await submitAnalysisToBlockchain(
-        contractAddress,
-        analysisResult
-      );
-      if (blockchainResult) {
-        console.log(
-          `[Rugsense/Aptos] Blockchain submission ready:`,
-          blockchainResult
-        );
-      }
-
-      return analysisResult;
+      return getPatternBasedAnalysis(sourceCode);
     }
   }
 
@@ -1120,42 +778,42 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                               );
                               if (alertDetailsEl) {
                                 alertDetailsEl.innerHTML = `
-                                <div style="margin-bottom: 8px;"><strong>Direction:</strong> ${
+                                <div style="margin-bottom: 8px;"><strong>🔍 Direction:</strong> ${
                                   isTrackedFrom ? 'FROM' : 'TO'
                                 } tracked address</div>
-                                <div style="margin-bottom: 8px;"><strong>Tracked Address:</strong> ${
+                                <div style="margin-bottom: 8px;"><strong>👤 Tracked Address:</strong> ${
                                   fromLower || toLower
                                 }</div>
-                                <div style="margin-bottom: 8px;"><strong>Contract Address:</strong> ${
+                                <div style="margin-bottom: 8px;"><strong>📄 Contract Address:</strong> ${
                                   to || 'N/A'
                                 }</div>
-                                <div style="margin-bottom: 8px;"><strong>Transaction Type:</strong> ${alertTxType}</div>
+                                <div style="margin-bottom: 8px;"><strong>⚡ Transaction Type:</strong> ${alertTxType}</div>
                                 ${
                                   methodDetails
-                                    ? `<div style="margin-bottom: 8px;"><strong>Method:</strong> ${methodDetails}</div>`
+                                    ? `<div style="margin-bottom: 8px;"><strong>🔧 Method:</strong> ${methodDetails}</div>`
                                     : ''
                                 }
-                                <div style="margin-bottom: 8px;"><strong>Contract Status:</strong> ${contractStatus}${networkInfo}</div>
-                                <div style="margin-bottom: 8px;"><strong>Security Risk:</strong> <span style="color: ${riskColor}; font-weight: bold;">${
+                                <div style="margin-bottom: 8px;"><strong>🔒 Contract Status:</strong> ${contractStatus}${networkInfo}</div>
+                                <div style="margin-bottom: 8px;"><strong>🛡️ Security Risk:</strong> <span style="color: ${riskColor}; font-weight: bold;">${
                                   securityResult.riskLevel
                                 }</span></div>
-                                <div style="margin-bottom: 8px;"><strong>Time:</strong> ${new Date().toLocaleTimeString()}</div>
+                                <div style="margin-bottom: 8px;"><strong>⏰ Time:</strong> ${new Date().toLocaleTimeString()}</div>
                                 <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
-                                  <strong>Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
+                                  <strong>⚠️ Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
                                   ${
                                     !verificationResult.isVerified
-                                      ? '<br><strong>UNVERIFIED CONTRACT:</strong> Source code not available - proceed with extreme caution!'
+                                      ? '<br><strong>🚨 UNVERIFIED CONTRACT:</strong> Source code not available - proceed with extreme caution!'
                                       : ''
                                   }
                                   ${
                                     securityResult.riskLevel === 'CRITICAL' ||
                                     securityResult.riskLevel === 'HIGH'
-                                      ? `<br><strong>HIGH RISK CONTRACT:</strong> ${securityResult.summary}`
+                                      ? `<br><strong>🚨 HIGH RISK CONTRACT:</strong> ${securityResult.summary}`
                                       : ''
                                   }
                                 </div>
                                 <div style="margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 6px; font-size: 11px;">
-                                  <strong>Security Issues:</strong><br>
+                                  <strong>🔍 Security Issues:</strong><br>
                                   ${securityResult.issues
                                     .slice(0, 3)
                                     .map((issue) => `• ${issue}`)
@@ -1178,28 +836,28 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                             );
                             if (alertDetailsEl) {
                               alertDetailsEl.innerHTML = `
-                              <div style="margin-bottom: 8px;"><strong>Direction:</strong> ${
+                              <div style="margin-bottom: 8px;"><strong>🔍 Direction:</strong> ${
                                 isTrackedFrom ? 'FROM' : 'TO'
                               } tracked address</div>
-                              <div style="margin-bottom: 8px;"><strong>Tracked Address:</strong> ${
+                              <div style="margin-bottom: 8px;"><strong>👤 Tracked Address:</strong> ${
                                 fromLower || toLower
                               }</div>
-                              <div style="margin-bottom: 8px;"><strong>Contract Address:</strong> ${
+                              <div style="margin-bottom: 8px;"><strong>📄 Contract Address:</strong> ${
                                 to || 'N/A'
                               }</div>
-                              <div style="margin-bottom: 8px;"><strong>Transaction Type:</strong> ${alertTxType}</div>
+                              <div style="margin-bottom: 8px;"><strong>⚡ Transaction Type:</strong> ${alertTxType}</div>
                               ${
                                 methodDetails
-                                  ? `<div style="margin-bottom: 8px;"><strong>Method:</strong> ${methodDetails}</div>`
+                                  ? `<div style="margin-bottom: 8px;"><strong>🔧 Method:</strong> ${methodDetails}</div>`
                                   : ''
                               }
-                              <div style="margin-bottom: 8px;"><strong>Contract Status:</strong> ${contractStatus}${networkInfo}</div>
-                              <div style="margin-bottom: 8px;"><strong> Time:</strong> ${new Date().toLocaleTimeString()}</div>
+                              <div style="margin-bottom: 8px;"><strong>🔒 Contract Status:</strong> ${contractStatus}${networkInfo}</div>
+                              <div style="margin-bottom: 8px;"><strong>⏰ Time:</strong> ${new Date().toLocaleTimeString()}</div>
                               <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
-                                <strong>Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
+                                <strong>⚠️ Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
                                 ${
                                   !verificationResult.isVerified
-                                    ? '<br><strong>UNVERIFIED CONTRACT:</strong> Source code not available - proceed with extreme caution!'
+                                    ? '<br><strong>🚨 UNVERIFIED CONTRACT:</strong> Source code not available - proceed with extreme caution!'
                                     : ''
                                 }
                               </div>
@@ -1210,30 +868,33 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                       );
                     }
 
+                    // İlk yükleme - verification bilgisi gelene kadar
                     alertDetails.innerHTML = `
-                      <div style="margin-bottom: 8px;"><strong>Direction:</strong> ${
+                      <div style="margin-bottom: 8px;"><strong>🔍 Direction:</strong> ${
                         isTrackedFrom ? 'FROM' : 'TO'
                       } tracked address</div>
-                      <div style="margin-bottom: 8px;"><strong>Tracked Address:</strong> ${
+                      <div style="margin-bottom: 8px;"><strong>👤 Tracked Address:</strong> ${
                         fromLower || toLower
                       }</div>
-                      <div style="margin-bottom: 8px;"><strong>Contract Address:</strong> ${
+                      <div style="margin-bottom: 8px;"><strong>📄 Contract Address:</strong> ${
                         to || 'N/A'
                       }</div>
-                      <div style="margin-bottom: 8px;"><strong>Transaction Type:</strong> ${alertTxType}</div>
+                      <div style="margin-bottom: 8px;"><strong>⚡ Transaction Type:</strong> ${alertTxType}</div>
                       ${
                         methodDetails
-                          ? `<div style="margin-bottom: 8px;"><strong>Method:</strong> ${methodDetails}</div>`
+                          ? `<div style="margin-bottom: 8px;"><strong>🔧 Method:</strong> ${methodDetails}</div>`
                           : ''
                       }
-                      <div style="margin-bottom: 8px;"><strong>Contract Status:</strong> Checking verification...</div>
-                      <div style="margin-bottom: 8px;"><strong>Time:</strong> ${new Date().toLocaleTimeString()}</div>
+                      <div style="margin-bottom: 8px;"><strong>🔒 Contract Status:</strong> 🔄 Checking verification...</div>
+                      <div style="margin-bottom: 8px;"><strong>⏰ Time:</strong> ${new Date().toLocaleTimeString()}</div>
                       <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
-                        <strong>Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
+                        <strong>⚠️ Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
                       </div>
                     `;
                   }
 
+                  // Alert'i kapatana kadar göster - otomatik gizleme yok
+                  // Sadece border'ı normale döndür
                   setTimeout(() => {
                     dropdown.style.border = '2px solid #9cd2ec';
                     dropdown.style.animation = '';
@@ -1246,14 +907,15 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
               }, 100);
 
               post('Rugsense/ApproveDetected', {
-                title: 'TRACKED ADDRESS TRANSACTION',
+                title: '🚨 TRACKED ADDRESS TRANSACTION',
                 body: `${isTrackedFrom ? 'FROM' : 'TO'} tracked address: ${
                   fromLower || toLower
                 }`,
               });
             }
 
-            const txHash = `${from}-${to}-${data}-${Date.now()}`;
+            // Transaction bilgilerini array'e ekle ve UI'da göster
+            const txHash = `${from}-${to}-${data}-${Date.now()}`; // Unique identifier
 
             if (!to && data) {
               const tx = {
@@ -1279,6 +941,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
               };
               addRecentTransaction(tx);
             } else if (to && data) {
+              // Method signature'ları kontrol et
               const methodSig = data.substring(0, 10);
               let txType = 'Contract Call';
 
@@ -1289,6 +952,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                 from: from,
               });
 
+              // Yaygın method signature'ları
               if (methodSig === '0xa9059cbb') {
                 txType = 'Token Transfer';
                 console.log('[Rugsense/inpage] Token Transfer detected');
@@ -1314,65 +978,25 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                 );
               }
 
+              // Contract verification kontrolü
               checkContractVerification(to).then((verificationResult) => {
-                console.log(
-                  `[Rugsense/Aptos] DEBUG - Verification result:`,
-                  verificationResult
-                );
-                console.log(
-                  `[Rugsense/Aptos] DEBUG - isTrackedFrom:`,
-                  isTrackedFrom
-                );
-                console.log(
-                  `[Rugsense/Aptos] DEBUG - isTrackedTo:`,
-                  isTrackedTo
-                );
-                console.log(
-                  `[Rugsense/Aptos] DEBUG - isVerified:`,
-                  verificationResult.isVerified
-                );
-                console.log(
-                  `[Rugsense/Aptos] DEBUG - hasSourceCode:`,
-                  !!verificationResult.sourceCode
-                );
-
-                console.log(
-                  `[Rugsense/Aptos] DEBUG - About to check analysis condition: isTrackedFrom=${isTrackedFrom}, isTrackedTo=${isTrackedTo}`
-                );
-
-                if (isTrackedFrom || isTrackedTo) {
+                // Security analysis yap (sadece tracked address transaction'larında)
+                if (
+                  verificationResult.isVerified &&
+                  verificationResult.sourceCode &&
+                  (isTrackedFrom || isTrackedTo)
+                ) {
                   console.log(
-                    `[Rugsense/Aptos] DEBUG - Analysis condition met, starting analysis...`
-                  );
-
-                  if (
-                    verificationResult.isVerified &&
-                    verificationResult.sourceCode
-                  ) {
-                    console.log(
-                      `[Rugsense/inpage] Running full analysis for verified contract in tracked address transaction`
-                    );
-                  } else {
-                    console.log(
-                      `[Rugsense/inpage] Running basic analysis for unverified contract in tracked address transaction`
-                    );
-                  }
-
-                  console.log(
-                    `[Rugsense/Aptos] DEBUG - Calling analyzeContractSecurity for: ${to}`
+                    `[Rugsense/inpage] Running AI analysis for tracked address transaction in recent transactions`
                   );
                   analyzeContractSecurity(
                     to,
                     verificationResult.sourceCode
                   ).then((securityResult) => {
-                    console.log(
-                      `[Rugsense/Aptos] DEBUG - Analysis completed, result:`,
-                      securityResult
-                    );
                     const tx = {
                       id: txHash,
                       type: txType,
-                      address: to,
+                      address: to, // Contract adresi (doğru)
                       timestamp: Date.now(),
                       details: {
                         method: methodSig,
@@ -1382,16 +1006,17 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                         network: verificationResult.network,
                         securityRisk: securityResult.riskLevel,
                         securityIssues: securityResult.issues,
-                        from: from,
+                        from: from, // Wallet adresi de ekle
                       },
                     };
                     addRecentTransaction(tx);
                   });
                 } else {
+                  // Source code yoksa normal transaction
                   const tx = {
                     id: txHash,
                     type: txType,
-                    address: to,
+                    address: to, // Contract adresi (doğru)
                     timestamp: Date.now(),
                     details: {
                       method: methodSig,
@@ -1399,18 +1024,15 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                       contractName: verificationResult.contractName,
                       compilerVersion: verificationResult.compilerVersion,
                       network: verificationResult.network,
-                      from: from,
+                      from: from, // Wallet adresi de ekle
                     },
                   };
                   addRecentTransaction(tx);
                 }
               });
-            } else {
-              console.log(
-                `[Rugsense/Aptos] DEBUG - Analysis condition NOT met: isTrackedFrom=${isTrackedFrom}, isTrackedTo=${isTrackedTo}`
-              );
             }
 
+            // Orijinal çağrıyı yap
             return await target.apply(thisArg, argArray);
           }
           function post(type: string, payload: any) {
@@ -1421,7 +1043,9 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
               address: payload?.address,
             };
             console.log('[Rugsense/inpage] post:', type, payload);
+            // 1) window.postMessage
             window.postMessage(packet, '*');
+            // 2) DOM CustomEvent (sandbox yedeği)
             try {
               document.dispatchEvent(
                 new CustomEvent('RugsenseInpageEvent', { detail: packet })
@@ -1433,6 +1057,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
             return a ? a.slice(0, 6) + '…' + a.slice(-4) : 'unknown';
           }
 
+          // 2) Hesap isteği → adresi takip et
           if (args?.method === 'eth_requestAccounts') {
             console.log('[Rugsense/inpage] eth_requestAccounts via', label);
             const res = await target.apply(thisArg, argArray);
@@ -1441,6 +1066,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
             return res;
           }
 
+          // 3) Diğer transaction method'ları
           if (args?.method === 'eth_sendRawTransaction') {
             console.log('[Rugsense/inpage] eth_sendRawTransaction via', label);
             post('Rugsense/ApproveDetected', {
@@ -1459,6 +1085,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
             return await target.apply(thisArg, argArray);
           }
 
+          // 4) İmza akışları
           if (
             (args?.method || '').startsWith('eth_signTypedData') ||
             args?.method === 'personal_sign'
@@ -1502,11 +1129,14 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     LAST_SIG.set(provider, proxy.toString());
   }
 
+  // Tüm bilinen provider yüzeylerini tara ve hook'la
   function scanAndHookAll() {
     const w = window as any;
 
+    // 1) window.ethereum
     if (w.ethereum) {
       hookProvider(w.ethereum, 'window.ethereum');
+      // 2) window.ethereum.providers (EIP-6963 toplaması)
       if (Array.isArray(w.ethereum.providers)) {
         for (const p of w.ethereum.providers) {
           hookProvider(p, 'ethereum.providers[]');
@@ -1514,8 +1144,10 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       }
     }
 
+    // 3) Remix-specific provider'lar
     if (w.remix) {
       console.log('[Rugsense/inpage] Remix detected, scanning for providers');
+      // Remix'in kendi provider'larını ara
       const remixProviders = [
         w.remix.ethereum,
         w.remix.provider,
@@ -1528,14 +1160,14 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       });
     }
 
+    // 4) Remix IDE specific detection
     if (
       location.hostname.includes('remix.ethereum.org') ||
       location.hostname.includes('remix-project.org')
     ) {
-      console.log(
-        '[Rugsense/inpage] Remix IDE detected, setting up specific hooks'
-      );
+      // console.log("[Rugsense/inpage] Remix IDE detected, setting up specific hooks"); // Spam log'u kaldırıldı
 
+      // Remix'in kendi transaction handler'larını ara
       const remixElements = [
         'remix-app',
         'remix-ide',
@@ -1551,6 +1183,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
             `[Rugsense/inpage] Found Remix element: ${selector}[${i}]`
           );
 
+          // Click event'lerini dinle
           element.addEventListener('click', (e) => {
             console.log(
               `[Rugsense/inpage] Remix element clicked: ${selector}`,
@@ -1565,10 +1198,12 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       });
     }
 
-    if (w.web3?.currentProvider) {
-      hookProvider(w.web3.currentProvider, 'web3.currentProvider');
+    // 4) Web3 provider'ları
+    if ((w as any).web3?.currentProvider) {
+      hookProvider((w as any).web3.currentProvider, 'web3.currentProvider');
     }
 
+    // 5) Diğer yaygın provider isimleri
     const commonProviders = [
       'ethereum',
       'web3',
@@ -1584,19 +1219,25 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     });
   }
 
+  // Başlangıç taraması
   scanAndHookAll();
 
+  // Takip edilen adresleri yükle
   getTrackedAddresses();
 
+  // Dropdown UI fonksiyonu
   function createDropdownUI() {
+    // Mevcut dropdown'ı kaldır
     const existingDropdown = document.getElementById('rugsense-dropdown');
     if (existingDropdown) {
       existingDropdown.remove();
     }
 
+    // Dropdown container oluştur
     const dropdown = document.createElement('div');
     dropdown.id = 'rugsense-dropdown';
     dropdown.classList.add('rugsense-dropdown-wrapper');
+    // Basit test dropdown - sadece input ve analiz
     dropdown.innerHTML = `
       <div style="padding: 20px; color: white; font-family: Arial, sans-serif;">
         <div class="logo-wrapper">
@@ -1607,7 +1248,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
         </div>
         
         <div id="rugsense-alert-section" style="display: none; background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 3px solid #ef4444; position: relative; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.3);">
-          <div style="font-weight: bold; font-size: 18px; margin-bottom: 15px; text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,0.3);"> TRACKED ADDRESS ALERT</div>
+          <div style="font-weight: bold; font-size: 18px; margin-bottom: 15px; text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">🚨 TRACKED ADDRESS ALERT</div>
           <div id="rugsense-alert-details" style="font-size: 14px; line-height: 1.6; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"></div>
           <button id="rugsense-alert-close" style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.3); color: white; font-size: 18px; cursor: pointer; padding: 5px 10px; border-radius: 6px; width: auto; height: auto;">×</button>
         </div>
@@ -1615,33 +1256,14 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
         <div style="display: flex; gap: 10px; margin-bottom: 15px;">
           <button id="rugsense-manage-addresses" 
                   style="flex: 1; padding: 10px; background: #3b82f6; color: white; 
-                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-            Manage Addresses
+                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
+                         display: flex; align-items: center; justify-content: center; gap: 8px;">
+            📋 Manage Addresses
           </button>
           <button id="rugsense-recent-transactions-btn" 
                   style="flex: 1; padding: 10px; background: #10b981; color: white; 
                          border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-            Recent Transactions
-          </button>
-        </div>
-        
-        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-          <button id="rugsense-blockchain-cache" 
-                  style="flex: 1; padding: 10px; background: #8b5cf6; color: white; 
-                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-            Blockchain Cache
-          </button>
-          <button id="rugsense-aptos-wallet" 
-                  style="flex: 1; padding: 10px; background: ${
-                    connectedWalletAddress ? '#10b981' : '#f59e0b'
-                  }; color: white; 
-                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-            ${connectedWalletAddress ? ' Wallet Connected' : ' Connect Aptos'}
-          </button>
-          <button id="rugsense-clear-wallet" 
-                  style="flex: 1; padding: 10px; background: #dc3545; color: white; 
-                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-             Clear Wallet
+            📊 Recent Transactions
           </button>
         </div>
         
@@ -1649,17 +1271,18 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
           <button id="rugsense-settings" 
                   style="flex: 1; padding: 10px; background: #6b7280; color: white; 
                          border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-             Settings
+            ⚙️ Settings
           </button>
           <button id="rugsense-close-dropdown" 
                   style="flex: 1; padding: 10px; background: #ef4444; color: white; 
                          border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-             Close
+            ❌ Close
           </button>
         </div>
       </div>
     `;
 
+    // CSS stilleri ekle
     const style = document.createElement('style');
     style.textContent = `
       .rugsense-dropdown-wrapper {
@@ -1826,38 +1449,38 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
         line-height: 1.4;
       }
       
-      .rugsense-no-addresses,
-      .rugsense-no-alerts {
-        text-align: center;
-        color: #666;
-        font-size: 12px;
-        padding: 20px;
-      }
+       .rugsense-no-addresses,
+       .rugsense-no-alerts {
+         text-align: center;
+         color: #666;
+         font-size: 12px;
+         padding: 20px;
+       }
+       
+       .logo-wrapper {
+         display: flex;
+         align-items: center;
+         justify-content: center;
+         gap: 10px;
+         font-size: 18px;
+         font-weight: bold;
+         margin-bottom: 15px;
+         color: #9cd2ec;
+       }
 
-      .logo-wrapper {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        font-size: 18px;
-        font-weight: bold;
-        margin-bottom: 15px;
-        color: #9cd2ec;
-      }
-
-      .logo-text {
-        font-family: 'Play', 'Arial', sans-serif;
+       .logo-text {
+       font-family: 'Play', 'Arial', sans-serif;
         font-size: 24px;
         font-weight: bold;
         color: #9cd2ec;
-      }
+       }
        
-      .play-bold {
-        font-family: 'Play', 'Arial', sans-serif;
-        font-weight: bold;
-        font-size: 18px;
-        color: #9cd2ec;
-      }
+       .play-bold {
+         font-family: 'Play', 'Arial', sans-serif;
+         font-weight: bold;
+         font-size: 18px;
+         color: #9cd2ec;
+       }
     `;
 
     // Güvenli DOM ekleme
@@ -1960,218 +1583,17 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
         showSettings();
       });
     }
-
-    // Blockchain Cache butonu
-    const blockchainBtn = document.getElementById('rugsense-blockchain-cache');
-    if (blockchainBtn) {
-      blockchainBtn.addEventListener('click', () => {
-        showBlockchainCache();
-      });
-    }
-
-    // Aptos Wallet butonu
-    const aptosBtn = document.getElementById('rugsense-aptos-wallet');
-    if (aptosBtn) {
-      aptosBtn.addEventListener('click', () => {
-        connectAptosWallet();
-      });
-    }
-
-    // Clear Wallet butonu
-    const clearBtn = document.getElementById('rugsense-clear-wallet');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        clearWalletAddress();
-        showWalletNotFound();
-        console.log('[Rugsense/Aptos] Wallet cleared');
-      });
-    }
   }
 
-  function showBlockchainCache() {
-    const existing = document.getElementById('rugsense-blockchain-cache-page');
-    if (existing) {
-      existing.remove();
-    }
-
-    const cachePage = document.createElement('div');
-    cachePage.id = 'rugsense-blockchain-cache-page';
-    cachePage.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-      background: rgba(0,0,0,0.9); z-index: 2147483648; 
-      display: flex; align-items: center; justify-content: center;
-      font-family: Arial, sans-serif;
-    `;
-
-    cachePage.innerHTML = `
-      <div style="background: #1f2937; color: white; padding: 30px; border-radius: 12px; 
-                  max-width: 600px; width: 90%; max-height: 80%; overflow-y: auto;
-                  border: 2px solid #8b5cf6;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <h2 style="margin: 0; color: #8b5cf6;">Blockchain Cache</h2>
-          <button id="rugsense-cache-close" style="background: #ef4444; color: white; border: none; 
-                    padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 16px;">×</button>
-        </div>
-        
-        <div style="background: #374151; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-          <h3 style="color: #8b5cf6; margin-top: 0;">🦎 Aptos Contract</h3>
-          <p style="margin: 10px 0; font-size: 14px; color: #d1d5db;">
-            <strong>Address:</strong> <code style="background: #1f2937; padding: 2px 6px; border-radius: 4px;">${APTOS_CONTRACT_ADDRESS}</code>
-          </p>
-          <p style="margin: 10px 0; font-size: 14px; color: #d1d5db;">
-            <strong>Network:</strong> <span style="color: #10b981;">${APTOS_NETWORK}</span>
-          </p>
-          <p style="margin: 10px 0; font-size: 14px; color: #d1d5db;">
-            <strong>Reward:</strong> <span style="color: #f59e0b;">0.01 APT (testnet)</span>
-          </p>
-        </div>
-        
-        <div style="background: #374151; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-          <h3 style="color: #8b5cf6; margin-top: 0;">Cache Status</h3>
-          <p style="margin: 10px 0; font-size: 14px; color: #d1d5db;">
-            <strong>Local Cache:</strong> <span style="color: #10b981;">${
-              securityAnalysisCache.size
-            } analyses</span>
-          </p>
-          <p style="margin: 10px 0; font-size: 14px; color: #d1d5db;">
-            <strong>Blockchain Submissions:</strong> <span style="color: ${
-              connectedWalletAddress ? '#10b981' : '#f59e0b'
-            };">${
-      connectedWalletAddress
-        ? `Connected: ${connectedWalletAddress.slice(0, 8)}...`
-        : 'Ready for wallet connection'
-    }</span>
-          </p>
-        </div>
-        
-        <div style="background: #374151; padding: 20px; border-radius: 8px;">
-          <h3 style="color: #8b5cf6; margin-top: 0;">How It Works</h3>
-          <ol style="color: #d1d5db; font-size: 14px; line-height: 1.6;">
-            <li>Track an address in the extension</li>
-            <li>When a transaction is detected, analysis runs automatically</li>
-            <li>Analysis results are submitted to Aptos blockchain</li>
-            <li>First analyzer gets 0.01 APT testnet reward</li>
-            <li>Results are cached on-chain for future reference</li>
-          </ol>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(cachePage);
-
-    const closeBtn = document.getElementById('rugsense-cache-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => {
-        cachePage.remove();
-      });
-    }
-  }
-
-  async function connectAptosWallet() {
-    console.log('[Rugsense/Aptos] Wallet connection requested');
-
-    try {
-      let aptosWallet = null;
-      if (typeof window !== 'undefined') {
-        if ((window as any).aptos) {
-          aptosWallet = (window as any).aptos; // Petra
-          console.log('[Rugsense/Aptos] Using Petra wallet');
-        } else if ((window as any).martian) {
-          aptosWallet = (window as any).martian; // Martian
-          console.log('[Rugsense/Aptos] Using Martian wallet');
-        } else if ((window as any).pontem) {
-          aptosWallet = (window as any).pontem; // Pontem
-          console.log('[Rugsense/Aptos] Using Pontem wallet');
-        } else if ((window as any).fewcha) {
-          aptosWallet = (window as any).fewcha; // Fewcha
-          console.log('[Rugsense/Aptos] Using Fewcha wallet');
-        } else if ((window as any).rise) {
-          aptosWallet = (window as any).rise; // Rise
-          console.log('[Rugsense/Aptos] Using Rise wallet');
-        }
-      }
-
-      if (aptosWallet) {
-        // Wallet'a bağlan
-        const response = await aptosWallet.connect();
-        console.log('[Rugsense/Aptos] Wallet connected:', response);
-
-        const account = await aptosWallet.account();
-        console.log('[Rugsense/Aptos] Account:', account);
-
-        saveWalletAddress(account.address);
-
-        clearWalletAddress();
-        saveWalletAddress(account.address);
-
-        showWalletConnected(account.address);
-      } else {
-        showWalletNotFound();
-      }
-    } catch (error) {
-      console.error('[Rugsense/Aptos] Wallet connection error:', error);
-      showWalletError(error);
-    }
-  }
-
-  function showWalletConnected(address: string) {
-    const walletPage = document.createElement('div');
-    walletPage.id = 'rugsense-wallet-connected';
-    walletPage.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-      background: rgba(0,0,0,0.9); z-index: 2147483648; 
-      display: flex; align-items: center; justify-content: center;
-      font-family: Arial, sans-serif;
-    `;
-
-    walletPage.innerHTML = `
-      <div style="background: #1f2937; color: white; padding: 30px; border-radius: 12px; 
-                  max-width: 500px; width: 90%; text-align: center;
-                  border: 2px solid #10b981;">
-        <h2 style="margin: 0 0 20px 0; color: #10b981;">🦎 Aptos Wallet Connected!</h2>
-        <p style="margin: 10px 0; font-size: 14px; color: #d1d5db;">
-          <strong>Address:</strong> <code style="background: #374151; padding: 4px 8px; border-radius: 4px;">${address}</code>
-        </p>
-        <p style="margin: 20px 0; font-size: 14px; color: #d1d5db;">
-          Now you can submit analysis results to blockchain and earn 0.01 APT rewards!
-        </p>
-        <button id="rugsense-wallet-close" style="background: #10b981; color: white; border: none; 
-                  padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 16px; margin-top: 20px;">
-          Continue
-        </button>
-      </div>
-    `;
-
-    document.body.appendChild(walletPage);
-
-    const closeBtn = document.getElementById('rugsense-wallet-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => {
-        walletPage.remove();
-      });
-    }
-  }
-
-  function showWalletNotFound() {
-    alert(
-      `🦎 Aptos Wallet Not Found\n\nPlease install an Aptos wallet:\n• Petra Wallet (Chrome Extension)\n• Martian Wallet\n• Pontem Wallet\n\nThen refresh the page and try again.`
-    );
-  }
-
-  function showWalletError(error: any) {
-    alert(
-      `🦎 Aptos Wallet Error\n\nError: ${
-        error.message || error
-      }\n\nPlease try again or check your wallet connection.`
-    );
-  }
-
+  // Address management sayfasını göster
   function showAddressManagement() {
+    // Mevcut address management sayfasını kaldır
     const existing = document.getElementById('rugsense-address-management');
     if (existing) {
       existing.remove();
     }
 
+    // Yeni sayfa oluştur
     const managementPage = document.createElement('div');
     managementPage.id = 'rugsense-address-management';
     managementPage.style.cssText = `
@@ -2190,7 +1612,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     managementPage.innerHTML = `
       <div style="background: #1a1a1a; border: 2px solid #9cd2ec; border-radius: 12px; padding: 20px; width: 500px; max-height: 80vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <h2 style="color: #9cd2ec; margin: 0;">Manage Tracked Addresses</h2>
+          <h2 style="color: #9cd2ec; margin: 0;">📋 Manage Tracked Addresses</h2>
           <button id="rugsense-close-management" style="background: #ef4444; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer;">Close</button>
         </div>
         
@@ -2234,6 +1656,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
     document.body.appendChild(managementPage);
 
+    // Event listener'ları ekle
     const closeBtn = document.getElementById('rugsense-close-management');
     const addBtn = document.getElementById('rugsense-add-new');
     const addressInput = document.getElementById('rugsense-new-address');
@@ -2246,8 +1669,9 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
     if (addBtn && addressInput) {
       addBtn.addEventListener('click', () => {
-        const address = addressInput.value.trim();
+        const address = (addressInput as HTMLInputElement).value.trim();
         if (address && address.startsWith('0x') && address.length === 42) {
+          // Content script'e mesaj gönder
           window.postMessage(
             {
               target: 'RugsenseContent',
@@ -2257,8 +1681,9 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
             '*'
           );
 
+          // Local state'i güncelle
           trackedAddresses.push(address.toLowerCase());
-          addressInput.value = '';
+          (addressInput as HTMLInputElement).value = '';
           updateManagementList();
         }
       });
@@ -2270,6 +1695,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       });
     }
 
+    // Management listesini güncelle
     function updateManagementList() {
       const list = document.getElementById('rugsense-management-list');
       if (list) {
@@ -2290,7 +1716,9 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     }
   }
 
+  // Recent Transactions sayfasını göster
   function showRecentTransactions() {
+    // Mevcut recent transactions sayfasını kaldır
     const existing = document.getElementById(
       'rugsense-recent-transactions-page'
     );
@@ -2298,6 +1726,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       existing.remove();
     }
 
+    // Yeni sayfa oluştur
     const transactionsPage = document.createElement('div');
     transactionsPage.id = 'rugsense-recent-transactions-page';
     transactionsPage.style.cssText = `
@@ -2316,7 +1745,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     transactionsPage.innerHTML = `
       <div style="background: #1a1a1a; border: 2px solid #9cd2ec; border-radius: 12px; padding: 20px; width: 800px; max-height: 80vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <h2 style="color: #9cd2ec; margin: 0;">Recent Transactions (${
+          <h2 style="color: #9cd2ec; margin: 0;">📊 Recent Transactions (${
             recentTransactions.length
           })</h2>
           <button id="rugsense-close-transactions" style="background: #ef4444; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer;">Close</button>
@@ -2353,7 +1782,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                         ? ` | ${tx.details.network}`
                         : '';
                       const securityRisk = tx.details.securityRisk
-                        ? ` | ${tx.details.securityRisk}`
+                        ? ` | 🛡️ ${tx.details.securityRisk}`
                         : '';
                       details = `Mint to: ${short(tx.details.from)} | ${
                         tx.details.verified ? '✅ Verified' : '❌ UNVERIFIED'
@@ -2366,7 +1795,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                         ? ` | ${tx.details.network}`
                         : '';
                       const securityRisk = tx.details.securityRisk
-                        ? ` | ${tx.details.securityRisk}`
+                        ? ` | 🛡️ ${tx.details.securityRisk}`
                         : '';
                       details = `Transfer | ${
                         tx.details.verified ? '✅ Verified' : '❌ UNVERIFIED'
@@ -2379,7 +1808,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                         ? ` | ${tx.details.network}`
                         : '';
                       const securityRisk = tx.details.securityRisk
-                        ? ` | ${tx.details.securityRisk}`
+                        ? ` | 🛡️ ${tx.details.securityRisk}`
                         : '';
                       details = `Approval | ${
                         tx.details.verified ? '✅ Verified' : '❌ UNVERIFIED'
@@ -2392,7 +1821,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                         ? ` | ${tx.details.network}`
                         : '';
                       const securityRisk = tx.details.securityRisk
-                        ? ` | ${tx.details.securityRisk}`
+                        ? ` | 🛡️ ${tx.details.securityRisk}`
                         : '';
                       details = `Set Approval | ${
                         tx.details.verified ? '✅ Verified' : '❌ UNVERIFIED'
@@ -2405,7 +1834,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                         ? ` | ${tx.details.network}`
                         : '';
                       const securityRisk = tx.details.securityRisk
-                        ? ` | ${tx.details.securityRisk}`
+                        ? ` | 🛡️ ${tx.details.securityRisk}`
                         : '';
                       details = `Method: ${tx.details.method} | ${
                         tx.details.verified ? '✅ Verified' : '❌ UNVERIFIED'
@@ -2431,6 +1860,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
     document.body.appendChild(transactionsPage);
 
+    // Event listener'ları ekle
     const closeBtn = document.getElementById('rugsense-close-transactions');
     if (closeBtn) {
       closeBtn.addEventListener('click', () => {
@@ -2439,10 +1869,12 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     }
   }
 
+  // Settings sayfasını göster
   function showSettings() {
     alert('Settings page coming soon!');
   }
 
+  // Dropdown içeriğini güncelle
   function updateDropdownContent() {
     const addressList = document.getElementById('rugsense-address-list');
     if (addressList) {
@@ -2487,7 +1919,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
   function addRecentTransaction(tx: any) {
     // Duplicate kontrolü - aynı ID'ye sahip transaction var mı?
     const isDuplicate = recentTransactions.some(
-      (existing) => existing.id === tx.id
+      (existing) => (existing as any).id === tx.id
     );
 
     if (!isDuplicate) {
@@ -2564,6 +1996,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     }
   }
 
+  // Dropdown'ı göster/gizle
   function toggleDropdown() {
     const dropdown = document.getElementById('rugsense-dropdown');
     if (dropdown) {
@@ -2590,8 +2023,10 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     }
   }
 
+  // Global toggle fonksiyonu
   (window as any).toggleRugsenseDropdown = toggleDropdown;
 
+  // Content script'ten gelen toggle mesajını dinle
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const data = event.data;
@@ -2605,9 +2040,11 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
     }
   });
 
+  // Global window object'lerini hook'la
   function setupGlobalHooks() {
     const w = window as any;
 
+    // window.ethereum'u global olarak hook'la
     if (w.ethereum) {
       console.log('[Rugsense/inpage] Setting up global ethereum hook');
       const originalEthereum = w.ethereum;
@@ -2630,11 +2067,12 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       });
     }
 
-    if (w.web3) {
+    // window.web3'ü global olarak hook'la
+    if ((w as any).web3) {
       console.log('[Rugsense/inpage] Setting up global web3 hook');
-      const originalWeb3 = w.web3;
+      const originalWeb3 = (w as any).web3;
 
-      w.web3 = new Proxy(originalWeb3, {
+      (w as any).web3 = new Proxy(originalWeb3, {
         get(target, prop) {
           if (prop === 'eth') {
             const eth = target.eth;
@@ -2667,15 +2105,18 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
   setupGlobalHooks();
 
+  // Network monitoring - fetch ve XMLHttpRequest'i hook'la
   function setupNetworkMonitoring() {
     console.log('[Rugsense/inpage] Setting up network monitoring');
 
+    // Fetch API'yi hook'la
     const originalFetch = window.fetch;
     window.fetch = async (...args) => {
       const [resource, config] = args;
       const url =
         typeof resource === 'string' ? resource : (resource as Request).url;
 
+      // RPC endpoint'lerini kontrol et
       if (
         url.includes('eth_') ||
         url.includes('rpc') ||
@@ -2714,12 +2155,13 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
               if (isTrackedFrom || isTrackedTo) {
                 post('Rugsense/ApproveDetected', {
-                  title: 'TRACKED ADDRESS RPC TRANSACTION',
+                  title: '🚨 TRACKED ADDRESS RPC TRANSACTION',
                   body: `${
                     isTrackedFrom ? 'FROM' : 'TO'
                   } tracked address via RPC: ${from || to}`,
                 });
               } else if (to) {
+                // Contract verification kontrolü
                 checkContractVerification(to).then((isVerified) => {
                   if (!isVerified) {
                     post('Rugsense/ApproveDetected', {
@@ -2740,13 +2182,16 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                 });
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            // JSON parse hatası, görmezden gel
+          }
         }
       }
 
       return await originalFetch(...args);
     };
 
+    // XMLHttpRequest'i hook'la
     const originalXHROpen = XMLHttpRequest.prototype.open;
     const originalXHRSend = XMLHttpRequest.prototype.send;
 
@@ -2804,7 +2249,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
               if (isTrackedFrom || isTrackedTo) {
                 post('Rugsense/ApproveDetected', {
-                  title: 'TRACKED ADDRESS RPC TRANSACTION',
+                  title: '🚨 TRACKED ADDRESS RPC TRANSACTION',
                   body: `${
                     isTrackedFrom ? 'FROM' : 'TO'
                   } tracked address via XHR: ${from || to}`,
@@ -2816,7 +2261,9 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
                 });
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            // JSON parse hatası, görmezden gel
+          }
         }
       }
 
@@ -2826,6 +2273,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
 
   setupNetworkMonitoring();
 
+  // Tüm button click'lerini dinle (Remix için) - sadeleştirilmiş
   document.addEventListener('click', (e) => {
     const target = e.target as Element;
 
@@ -2834,6 +2282,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
       const buttonClass = target.className?.toLowerCase() || '';
       const buttonId = target.id?.toLowerCase() || '';
 
+      // Transaction ile ilgili button'ları yakala
       if (
         buttonText.includes('transact') ||
         buttonText.includes('send') ||
@@ -2888,7 +2337,7 @@ ${sourceCode.substring(0, 4000)} // Limit to 4000 chars for API
   setTimeout(() => {
     console.log('[Rugsense/inpage] DEBUG - Window objects:', {
       ethereum: !!window.ethereum,
-      web3: !!window.web3,
+      web3: !!(window as any).web3,
       remix: !!(window as any).remix,
       location: location.href,
       userAgent: navigator.userAgent,
