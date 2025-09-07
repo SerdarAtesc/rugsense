@@ -1,14 +1,40 @@
 // src/content.ts
 console.log("[Aegis/content] start", location.href);
-try {
-  const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("dist/inpage.js");
-  script.onload = () => {
-    console.log("[Aegis/content] Inpage script injected successfully");
-  };
-  (document.head || document.documentElement).appendChild(script);
-} catch (e) {
-  console.warn("[Aegis/content] Failed to inject inpage script:", e);
+if (location.href.startsWith("chrome://") || location.href.startsWith("chrome-extension://") || location.href.startsWith("moz-extension://")) {
+  console.log("[Aegis/content] Skipping injection on internal page:", location.href);
+  throw new Error("Cannot run on internal pages");
+}
+function injectInpageScript() {
+  try {
+    const existingScript = document.getElementById("aegis-inpage-script");
+    if (existingScript) {
+      existingScript.remove();
+    }
+    const script = document.createElement("script");
+    script.id = "aegis-inpage-script";
+    script.src = chrome.runtime.getURL("dist/inpage.js");
+    script.onload = () => {
+      console.log("[Aegis/content] Inpage script injected successfully");
+    };
+    script.onerror = () => {
+      console.warn("[Aegis/content] Inpage script failed to load, retrying...");
+      setTimeout(injectInpageScript, 100);
+    };
+    if (document.head) {
+      document.head.appendChild(script);
+    } else {
+      document.documentElement.appendChild(script);
+    }
+  } catch (e) {
+    console.warn("[Aegis/content] Failed to inject inpage script:", e);
+    setTimeout(injectInpageScript, 100);
+  }
+}
+injectInpageScript();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", injectInpageScript);
+} else {
+  injectInpageScript();
 }
 try {
   chrome.runtime.sendMessage({ type: "Aegis/ProgrammaticInject" });
