@@ -4,6 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
+ContractAnalyzer = "0x3a72ebb31931acbdd7b41220da261c435e77358924f1d73c5de05b23d1e94cca"
 
 [dev-addresses]
 
