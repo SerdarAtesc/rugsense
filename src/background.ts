@@ -175,7 +175,7 @@ chrome.action.onClicked.addListener((tab) => {
     }
     
     console.log("[Aegis/bg] Extension icon clicked, sending toggle message");
-    chrome.tabs.sendMessage(tab.id, { type: "Aegis/ToggleDropdown" }, (response) => {
+    chrome.tabs.sendMessage(tab.id, { type: "Rugsense/ToggleDropdown" }, (response) => {
       if (chrome.runtime.lastError) {
         console.log("[Aegis/bg] Content script not ready, injecting...");
         chrome.scripting.executeScript({
@@ -185,7 +185,7 @@ chrome.action.onClicked.addListener((tab) => {
           console.log("[Aegis/bg] Content script injected successfully");
           // Content script yüklendikten sonra mesaj gönder
           setTimeout(() => {
-            chrome.tabs.sendMessage(tab.id!, { type: "Aegis/ToggleDropdown" }, (response) => {
+            chrome.tabs.sendMessage(tab.id!, { type: "Rugsense/ToggleDropdown" }, (response) => {
               if (chrome.runtime.lastError) {
                 console.log("[Aegis/bg] Still can't reach content script:", chrome.runtime.lastError.message);
               } else {
