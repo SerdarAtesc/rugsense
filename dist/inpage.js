@@ -13202,7 +13202,6 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
                         id: txHash,
                         type: txType,
                         address: to,
-                        // Contract adresi (doğru)
                         timestamp: Date.now(),
                         details: {
                           method: methodSig,
@@ -13213,7 +13212,6 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
                           securityRisk: securityResult.riskLevel,
                           securityIssues: securityResult.issues,
                           from
-                          // Wallet adresi de ekle
                         }
                       };
                       addRecentTransaction(tx2);
@@ -13223,7 +13221,6 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
                       id: txHash,
                       type: txType,
                       address: to,
-                      // Contract adresi (doğru)
                       timestamp: Date.now(),
                       details: {
                         method: methodSig,
@@ -13232,7 +13229,6 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
                         compilerVersion: verificationResult.compilerVersion,
                         network: verificationResult.network,
                         from
-                        // Wallet adresi de ekle
                       }
                     };
                     addRecentTransaction(tx2);
@@ -13327,6 +13323,9 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
         });
       }
       if (location.hostname.includes("remix.ethereum.org") || location.hostname.includes("remix-project.org")) {
+        console.log(
+          "[Rugsense/inpage] Remix IDE detected, setting up specific hooks"
+        );
         const remixElements = [
           "remix-app",
           "remix-ide",
@@ -13443,10 +13442,10 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
       style.textContent = `
       .rugsense-dropdown-wrapper {
         position: fixed !important;
-        top: 60px !important;
+        top: 35px !important;
         left: 20px !important;
-        width: 450px !important;
-        min-height: 300px !important;
+        width: 380px !important;
+        min-height: 250px !important;
         background: #1a1a1a !important;
         border: 4px solid #9cd2ec !important;
         border-radius: 12px !important;
@@ -13490,13 +13489,13 @@ ${sourceCode.substring(0, 4e3)} // Limit to 4000 chars for API
       }
       
       .rugsense-dropdown-content {
-        padding: 20px;
-        max-height: 400px;
+        padding: 12px;
+        max-height: 300px;
         overflow-y: auto;
       }
       
       .rugsense-section {
-        margin-bottom: 20px;
+        margin-bottom: 12px;
       }
       
       .rugsense-section:last-child {
