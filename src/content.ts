@@ -81,17 +81,17 @@ function forwardToBg(data: any) {
 
 // Background'dan gelen mesajları dinle
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "Aegis/ToggleDropdown") {
-    console.log("[Aegis/content] Toggle dropdown requested");
+  if (msg.type === "Rugsense/ToggleDropdown") {
+    console.log("[Rugsense/content] Toggle dropdown requested");
     
     // Inpage script'in yüklenip yüklenmediğini kontrol et
-    if (typeof (window as any).toggleAegisDropdown === 'function') {
-      console.log("[Aegis/content] Inpage script ready, calling toggle directly");
-      (window as any).toggleAegisDropdown();
+    if (typeof (window as any).toggleRugsenseDropdown === 'function') {
+      console.log("[Rugsense/content] Inpage script ready, calling toggle directly");
+      (window as any).toggleRugsenseDropdown();
     } else {
-      console.log("[Aegis/content] Inpage script not ready, sending message");
+      console.log("[Rugsense/content] Inpage script not ready, sending message");
       // Inpage script'e mesaj gönder
-      window.postMessage({ target: "AegisInpage", type: "Aegis/ToggleDropdown" }, "*");
+      window.postMessage({ target: "RugsenseInpage", type: "Rugsense/ToggleDropdown" }, "*");
     }
     sendResponse({ ok: true });
   }

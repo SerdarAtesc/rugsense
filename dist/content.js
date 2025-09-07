@@ -63,14 +63,14 @@ function forwardToBg(data) {
   }
 }
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "Aegis/ToggleDropdown") {
-    console.log("[Aegis/content] Toggle dropdown requested");
-    if (typeof window.toggleAegisDropdown === "function") {
-      console.log("[Aegis/content] Inpage script ready, calling toggle directly");
-      window.toggleAegisDropdown();
+  if (msg.type === "Rugsense/ToggleDropdown") {
+    console.log("[Rugsense/content] Toggle dropdown requested");
+    if (typeof window.toggleRugsenseDropdown === "function") {
+      console.log("[Rugsense/content] Inpage script ready, calling toggle directly");
+      window.toggleRugsenseDropdown();
     } else {
-      console.log("[Aegis/content] Inpage script not ready, sending message");
-      window.postMessage({ target: "AegisInpage", type: "Aegis/ToggleDropdown" }, "*");
+      console.log("[Rugsense/content] Inpage script not ready, sending message");
+      window.postMessage({ target: "RugsenseInpage", type: "Rugsense/ToggleDropdown" }, "*");
     }
     sendResponse({ ok: true });
   }

@@ -9267,7 +9267,7 @@ function createFilterRequestScope(client2, { method }) {
       if (status === "success" && method === method_)
         requestMap[id] = transport.request;
     });
-  return ((id) => requestMap[id] || client2.request);
+  return (id) => requestMap[id] || client2.request;
 }
 
 // node_modules/viem/_esm/actions/public/createContractEventFilter.js
@@ -10669,13 +10669,13 @@ function observe(observerId, callbacks, fn) {
     return unwatch;
   const emit = {};
   for (const key in callbacks) {
-    emit[key] = ((...args) => {
+    emit[key] = (...args) => {
       const listeners2 = getListeners();
       if (listeners2.length === 0)
         return;
       for (const listener of listeners2)
         listener.fns[key]?.(...args);
-    });
+    };
   }
   const cleanup = fn(emit);
   if (typeof cleanup === "function")
@@ -16603,7 +16603,7 @@ chrome.action.onClicked.addListener((tab) => {
       return;
     }
     console.log("[Aegis/bg] Extension icon clicked, sending toggle message");
-    chrome.tabs.sendMessage(tab.id, { type: "Aegis/ToggleDropdown" }, (response) => {
+    chrome.tabs.sendMessage(tab.id, { type: "Rugsense/ToggleDropdown" }, (response) => {
       if (chrome.runtime.lastError) {
         console.log("[Aegis/bg] Content script not ready, injecting...");
         chrome.scripting.executeScript({
@@ -16612,7 +16612,7 @@ chrome.action.onClicked.addListener((tab) => {
         }).then(() => {
           console.log("[Aegis/bg] Content script injected successfully");
           setTimeout(() => {
-            chrome.tabs.sendMessage(tab.id, { type: "Aegis/ToggleDropdown" }, (response2) => {
+            chrome.tabs.sendMessage(tab.id, { type: "Rugsense/ToggleDropdown" }, (response2) => {
               if (chrome.runtime.lastError) {
                 console.log("[Aegis/bg] Still can't reach content script:", chrome.runtime.lastError.message);
               } else {
@@ -16636,10 +16636,20 @@ subscribeTransfers();
   (*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
 
 @noble/curves/esm/abstract/utils.js:
+  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
 @noble/curves/esm/abstract/modular.js:
+  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
 @noble/curves/esm/abstract/curve.js:
+  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
 @noble/curves/esm/abstract/weierstrass.js:
+  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
 @noble/curves/esm/_shortw_utils.js:
+  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
 @noble/curves/esm/secp256k1.js:
   (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
 */
