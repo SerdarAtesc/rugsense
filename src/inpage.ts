@@ -9,6 +9,48 @@
   
   console.log("[Aegis/inpage] init", location.href);
 
+  // Değişkenleri en başta tanımla
+  let trackedAddresses: string[] = [];
+  let recentTransactions: Array<{
+    type: string;
+    address: string;
+    timestamp: number;
+    details: any;
+  }> = [];
+
+  // Global toggle fonksiyonunu hemen tanımla
+  (window as any).toggleAegisDropdown = () => {
+    const dropdown = document.getElementById('aegis-dropdown');
+    if (dropdown) {
+      const isVisible = dropdown.classList.contains('aegis-visible');
+      if (isVisible) {
+        dropdown.classList.remove('aegis-visible');
+        dropdown.style.display = 'none';
+        console.log("[Aegis/inpage] Dropdown hidden");
+      } else {
+        dropdown.classList.add('aegis-visible');
+        dropdown.style.display = 'block';
+        console.log("[Aegis/inpage] Dropdown shown");
+      }
+    } else {
+      console.log("[Aegis/inpage] Dropdown not found, creating...");
+      createDropdownUI();
+    }
+  };
+  
+  // DOM hazır olduğunda dropdown'ı oluştur
+  function initDropdown() {
+    if (document.head && document.body) {
+      createDropdownUI();
+    } else {
+      // DOM henüz hazır değil, bekle
+      setTimeout(initDropdown, 50);
+    }
+  }
+  
+  // Hemen dene, yoksa bekle
+  initDropdown();
+
   // Selector sabitleri (kullanılmıyor ama referans için bırakıldı)
   // const APPROVE = "0x095ea7b3";             // approve(address,uint256)
   // const SET_APPROVAL_FOR_ALL = "0xa22cb465"; // setApprovalForAll(address,bool)
@@ -19,18 +61,35 @@
   const ORIGINALS = new WeakMap<any, Function>(); // provider -> orijinal request
   const LAST_SIG = new WeakMap<any, string>();     // provider -> request.toString() imzası (değişirse yeniden hook)
   
-  // Takip edilen adresleri al
-  let trackedAddresses: string[] = [];
+  // Takip edilen adresleri al - content script üzerinden
   async function getTrackedAddresses() {
     return new Promise<string[]>((resolve) => {
       try {
-        chrome.storage.local.get({ addresses: [] }, (res) => {
-          trackedAddresses = (res.addresses || []).map((addr: string) => addr.toLowerCase());
-          console.log("[Aegis/inpage] Tracked addresses:", trackedAddresses);
-          resolve(trackedAddresses);
-        });
+        // Content script'e mesaj gönder
+        window.postMessage({ target: "AegisContent", type: "Aegis/GetAddresses" }, "*");
+        
+        // Response'u dinle
+        const handleResponse = (event: MessageEvent) => {
+          if (event.source !== window) return;
+          const data = event.data;
+          if (data && data.target === "AegisInpage" && data.type === "Aegis/AddressesResponse") {
+            trackedAddresses = (data.addresses || []).map((addr: string) => addr.toLowerCase());
+            console.log("[Aegis/inpage] Tracked addresses loaded:", trackedAddresses);
+            window.removeEventListener('message', handleResponse);
+            updateTrackedAddresses();
+            resolve(trackedAddresses);
+          }
+        };
+        
+        window.addEventListener('message', handleResponse);
+        
+        // Timeout fallback
+        setTimeout(() => {
+          window.removeEventListener('message', handleResponse);
+          resolve([]);
+        }, 1000);
       } catch (e) {
-        console.error("[Aegis/inpage] Chrome storage error:", e);
+        console.error("[Aegis/inpage] Get addresses error:", e);
         resolve([]);
       }
     });
@@ -135,37 +194,165 @@
                 trackedAddresses
               });
               
+              // Extension'ı otomatik aç - dropdown'ı göster ve vurgula
+              setTimeout(() => {
+                const dropdown = document.getElementById('aegis-dropdown');
+                if (dropdown) {
+                  dropdown.classList.add('aegis-visible');
+                  dropdown.style.display = 'block';
+                  
+                  // Dropdown'ı vurgula - kırmızı border ve animasyon
+                  dropdown.style.border = '3px solid #ef4444';
+                  dropdown.style.animation = 'pulse 1s ease-in-out 3';
+                  dropdown.style.zIndex = '999999999';
+                  
+                  // Alert bölümünü göster
+                  const alertSection = document.getElementById('aegis-alert-section');
+                  const alertDetails = document.getElementById('aegis-alert-details');
+                  if (alertSection && alertDetails) {
+                    alertSection.style.display = 'block';
+                    // Transaction type'ı method signature'a göre belirle
+                    let alertTxType = "Contract Call";
+                    if (data) {
+                      const methodSig = data.substring(0, 10);
+                      if (methodSig === "0xa9059cbb") alertTxType = "Token Transfer";
+                      else if (methodSig === "0x095ea7b3") alertTxType = "Token Approval";
+                      else if (methodSig === "0xa22cb465") alertTxType = "Set Approval For All";
+                      else if (methodSig === "0x40c10f19") alertTxType = "Mint";
+                      else if (methodSig === "0x42842e0e") alertTxType = "Safe Transfer From";
+                      else if (methodSig === "0x23b872dd") alertTxType = "Transfer From";
+                    } else if (!to) {
+                      alertTxType = "Contract Deployment";
+                    } else if (!data) {
+                      alertTxType = "ETH Transfer";
+                    }
+                    
+                    // Method signature'dan daha detaylı bilgi çıkar
+                    let methodDetails = '';
+                    if (data) {
+                      const methodSig = data.substring(0, 10);
+                      if (methodSig === "0xa9059cbb") {
+                        methodDetails = 'transfer(address,uint256)';
+                      } else if (methodSig === "0x095ea7b3") {
+                        methodDetails = 'approve(address,uint256)';
+                      } else if (methodSig === "0xa22cb465") {
+                        methodDetails = 'setApprovalForAll(address,bool)';
+                      } else if (methodSig === "0x40c10f19") {
+                        methodDetails = 'mint(address,uint256)';
+                      } else if (methodSig === "0x42842e0e") {
+                        methodDetails = 'safeTransferFrom(address,address,uint256)';
+                      } else if (methodSig === "0x23b872dd") {
+                        methodDetails = 'transferFrom(address,address,uint256)';
+                      } else {
+                        methodDetails = `Unknown method (${methodSig})`;
+                      }
+                    }
+                    
+                    alertDetails.innerHTML = `
+                      <div style="margin-bottom: 8px;"><strong>🔍 Direction:</strong> ${isTrackedFrom ? 'FROM' : 'TO'} tracked address</div>
+                      <div style="margin-bottom: 8px;"><strong>👤 Tracked Address:</strong> ${fromLower || toLower}</div>
+                      <div style="margin-bottom: 8px;"><strong>📄 Contract Address:</strong> ${to || 'N/A'}</div>
+                      <div style="margin-bottom: 8px;"><strong>⚡ Transaction Type:</strong> ${alertTxType}</div>
+                      ${methodDetails ? `<div style="margin-bottom: 8px;"><strong>🔧 Method:</strong> ${methodDetails}</div>` : ''}
+                      <div style="margin-bottom: 8px;"><strong>⏰ Time:</strong> ${new Date().toLocaleTimeString()}</div>
+                      <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
+                        <strong>⚠️ Warning:</strong> This transaction involves a tracked address. Please review carefully before proceeding.
+                      </div>
+                    `;
+                  }
+                  
+                  // Alert'i kapatana kadar göster - otomatik gizleme yok
+                  // Sadece border'ı normale döndür
+                  setTimeout(() => {
+                    dropdown.style.border = '2px solid #4ade80';
+                    dropdown.style.animation = '';
+                  }, 3000);
+                  
+                  console.log("[Aegis/inpage] Auto-opened dropdown for tracked address transaction");
+                }
+              }, 100);
+              
               post("Aegis/ApproveDetected", {
                 title: "🚨 TRACKED ADDRESS TRANSACTION",
                 body: `${isTrackedFrom ? 'FROM' : 'TO'} tracked address: ${fromLower || toLower}`,
               });
             }
             
-            // Basit bildirim gönder (Remix flow'unu bozmasın)
+            // Transaction bilgilerini array'e ekle ve UI'da göster
+            const txHash = `${from}-${to}-${data}-${Date.now()}`; // Unique identifier
+            
             if (!to && data) {
-              post("Aegis/ApproveDetected", {
-                title: "🚨 CONTRACT DEPLOYMENT",
-                body: `Contract deployment detected from ${from || "Unknown"}`,
-              });
+              const tx = {
+                id: txHash,
+                type: "Contract Deployment",
+                address: from || "Unknown",
+                timestamp: Date.now(),
+                details: {
+                  bytecodeLength: data.length,
+                  gas: args?.params?.[0]?.gas
+                }
+              };
+              addRecentTransaction(tx);
             } else if (to && !data) {
-              post("Aegis/ApproveDetected", {
-                title: "💰 ETH TRANSFER",
-                body: `ETH transfer to ${short(to)}`,
-              });
+              const tx = {
+                id: txHash,
+                type: "ETH Transfer",
+                address: to,
+                timestamp: Date.now(),
+                details: {
+                  value: args?.params?.[0]?.value
+                }
+              };
+              addRecentTransaction(tx);
             } else if (to && data) {
+              // Method signature'ları kontrol et
+              const methodSig = data.substring(0, 10);
+              let txType = "Contract Call";
+              
+              console.log("[Aegis/inpage] Contract call detected:", {
+                to: to,
+                data: data,
+                methodSig: methodSig,
+                from: from
+              });
+              
+              // Yaygın method signature'ları
+              if (methodSig === "0xa9059cbb") {
+                txType = "Token Transfer";
+                console.log("[Aegis/inpage] Token Transfer detected");
+              } else if (methodSig === "0x095ea7b3") {
+                txType = "Token Approval";
+                console.log("[Aegis/inpage] Token Approval detected");
+              } else if (methodSig === "0xa22cb465") {
+                txType = "Set Approval For All";
+                console.log("[Aegis/inpage] Set Approval For All detected");
+              } else if (methodSig === "0x40c10f19") {
+                txType = "Mint";
+                console.log("[Aegis/inpage] Mint detected");
+              } else if (methodSig === "0x42842e0e") {
+                txType = "Safe Transfer From";
+                console.log("[Aegis/inpage] Safe Transfer From detected");
+              } else if (methodSig === "0x23b872dd") {
+                txType = "Transfer From";
+                console.log("[Aegis/inpage] Transfer From detected");
+              } else {
+                console.log("[Aegis/inpage] Unknown method signature:", methodSig);
+              }
+              
               // Contract verification kontrolü
               checkContractVerification(to).then((isVerified) => {
-                if (!isVerified) {
-                  post("Aegis/ApproveDetected", {
-                    title: "⚠️ UNVERIFIED CONTRACT",
-                    body: `Contract call to UNVERIFIED contract!\nAddress: ${to}\n⚠️ Source code not available - proceed with caution!`,
-                  });
-                } else {
-                  post("Aegis/ApproveDetected", {
-                    title: "📋 CONTRACT INTERACTION",
-                    body: `Contract call to verified contract\nAddress: ${to}`,
-                  });
-                }
+                const tx = {
+                  id: txHash,
+                  type: txType,
+                  address: to, // Contract adresi (doğru)
+                  timestamp: Date.now(),
+                  details: {
+                    method: methodSig,
+                    verified: isVerified,
+                    from: from // Wallet adresi de ekle
+                  }
+                };
+                addRecentTransaction(tx);
               });
             }
             
@@ -323,9 +510,6 @@
     });
   }
 
-  // Dropdown UI'ı hemen oluştur - hızlı yükleme için
-  createDropdownUI();
-  
   // Başlangıç taraması
   scanAndHookAll();
   
@@ -350,37 +534,36 @@
           🛡️ Aegis - Address Tracker
         </div>
         
-        <div style="margin-bottom: 10px; color: #e5e7eb;">
-          Track Address:
-        </div>
-        <input type="text" id="aegis-address-input" placeholder="0x..." 
-               style="width: 100%; padding: 8px; border: 1px solid #374151; border-radius: 6px; 
-                      background: #1f2937; color: white; margin-bottom: 10px; box-sizing: border-box;" />
-        <button id="aegis-add-btn" 
-                style="width: 100%; padding: 10px; background: #4ade80; color: black; 
-                       border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 15px;">
-          Add Address
-        </button>
-        
-        <div style="font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #fbbf24;">
-          Tracked Addresses:
-        </div>
-        <div id="aegis-tracked-addresses" 
-             style="background: #111827; padding: 10px; border-radius: 6px; border: 1px solid #374151; 
-                    font-size: 12px; color: #d1d5db; line-height: 1.4; margin-bottom: 15px; max-height: 120px; overflow-y: auto;">
-          <div style="color: #9ca3af;">No addresses tracked yet</div>
+        <div id="aegis-alert-section" style="display: none; background: linear-gradient(135deg, #dc2626, #b91c1c); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 3px solid #ef4444; position: relative; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.3);">
+          <div style="font-weight: bold; font-size: 18px; margin-bottom: 15px; text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">🚨 TRACKED ADDRESS ALERT</div>
+          <div id="aegis-alert-details" style="font-size: 14px; line-height: 1.6; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"></div>
+          <button id="aegis-alert-close" style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.3); color: white; font-size: 18px; cursor: pointer; padding: 5px 10px; border-radius: 6px; width: auto; height: auto;">×</button>
         </div>
         
-        <div style="font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #fbbf24;">
-          Transaction Analysis:
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <button id="aegis-manage-addresses" 
+                  style="flex: 1; padding: 10px; background: #3b82f6; color: white; 
+                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
+            📋 Manage Addresses
+          </button>
+          <button id="aegis-recent-transactions-btn" 
+                  style="flex: 1; padding: 10px; background: #10b981; color: white; 
+                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
+            📊 Recent Transactions
+          </button>
         </div>
-        <div style="background: #111827; padding: 10px; border-radius: 6px; border: 1px solid #374151; 
-                    font-size: 12px; color: #d1d5db; line-height: 1.4;">
-          <div>• Contract Deployment: Bytecode analysis</div>
-          <div>• ETH Transfer: Amount & gas tracking</div>
-          <div>• Token Approval: Spender permissions</div>
-          <div>• Contract Call: Method signature detection</div>
-          <div>• Verification: Etherscan source check</div>
+        
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <button id="aegis-settings" 
+                  style="flex: 1; padding: 10px; background: #6b7280; color: white; 
+                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
+            ⚙️ Settings
+          </button>
+          <button id="aegis-close-dropdown" 
+                  style="flex: 1; padding: 10px; background: #ef4444; color: white; 
+                         border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
+            ❌ Close
+          </button>
         </div>
       </div>
     `;
@@ -391,14 +574,15 @@
       #aegis-dropdown {
         position: fixed !important;
         top: 60px !important;
-        right: 20px !important;
-        width: 350px !important;
+        left: 20px !important;
+        width: 450px !important;
         min-height: 300px !important;
         background: #1a1a1a !important;
         border: 2px solid #4ade80 !important;
         border-radius: 12px !important;
         box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
         z-index: 2147483647 !important;
+        z-index: 999999999 !important;
         font-family: Arial, sans-serif !important;
         color: white !important;
         display: none !important;
@@ -490,6 +674,12 @@
         background: #dc2626;
       }
       
+      @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); }
+      }
+      
       .aegis-add-address {
         display: flex;
         gap: 8px;
@@ -554,8 +744,18 @@
       }
     `;
     
-    document.head.appendChild(style);
-    document.body.appendChild(dropdown);
+    // Güvenli DOM ekleme
+    if (document.head) {
+      document.head.appendChild(style);
+    } else {
+      console.warn("[Aegis/inpage] document.head not available");
+    }
+    
+    if (document.body) {
+      document.body.appendChild(dropdown);
+    } else {
+      console.warn("[Aegis/inpage] document.body not available");
+    }
     
     // Başlangıçta gizli yap - hemen
     dropdown.style.display = 'none';
@@ -563,8 +763,11 @@
     // Event listener'ları ekle
     setupDropdownEvents();
     
-    // İlk yükleme
-    updateTrackedAddresses();
+    // İlk yükleme - storage'dan adresleri al
+    getTrackedAddresses();
+    
+    // Recent transactions'ı güncelle
+    updateRecentTransactions();
     
     console.log("[Aegis/inpage] Dropdown created and ready!");
   }
@@ -588,8 +791,128 @@
   
   // Dropdown event'leri
   function setupDropdownEvents() {
-    const addBtn = document.getElementById('aegis-add-btn');
-    const addressInput = document.getElementById('aegis-address-input');
+    // Alert kapatma butonu
+    const alertCloseBtn = document.getElementById('aegis-alert-close');
+    if (alertCloseBtn) {
+      alertCloseBtn.addEventListener('click', () => {
+        const alertSection = document.getElementById('aegis-alert-section');
+        if (alertSection) {
+          alertSection.style.display = 'none';
+        }
+      });
+    }
+    
+    // Manage Addresses butonu
+    const manageBtn = document.getElementById('aegis-manage-addresses');
+    if (manageBtn) {
+      manageBtn.addEventListener('click', () => {
+        showAddressManagement();
+      });
+    }
+    
+    // Recent Transactions butonu
+    const recentBtn = document.getElementById('aegis-recent-transactions-btn');
+    if (recentBtn) {
+      recentBtn.addEventListener('click', () => {
+        showRecentTransactions();
+      });
+    }
+    
+    // Close dropdown butonu
+    const closeBtn = document.getElementById('aegis-close-dropdown');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        const dropdown = document.getElementById('aegis-dropdown');
+        if (dropdown) {
+          dropdown.classList.remove('aegis-visible');
+          dropdown.style.display = 'none';
+        }
+      });
+    }
+    
+    // Settings butonu
+    const settingsBtn = document.getElementById('aegis-settings');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', () => {
+        showSettings();
+      });
+    }
+  }
+  
+  // Address management sayfasını göster
+  function showAddressManagement() {
+    // Mevcut address management sayfasını kaldır
+    const existing = document.getElementById('aegis-address-management');
+    if (existing) {
+      existing.remove();
+    }
+    
+    // Yeni sayfa oluştur
+    const managementPage = document.createElement('div');
+    managementPage.id = 'aegis-address-management';
+    managementPage.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: rgba(0,0,0,0.8) !important;
+      z-index: 999999999 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    `;
+    
+    managementPage.innerHTML = `
+      <div style="background: #1a1a1a; border: 2px solid #4ade80; border-radius: 12px; padding: 20px; width: 500px; max-height: 80vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2 style="color: #4ade80; margin: 0;">📋 Manage Tracked Addresses</h2>
+          <button id="aegis-close-management" style="background: #ef4444; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer;">Close</button>
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+          <label style="color: #e5e7eb; display: block; margin-bottom: 5px;">Add New Address:</label>
+          <div style="display: flex; gap: 10px;">
+            <input type="text" id="aegis-new-address" placeholder="0x..." 
+                   style="flex: 1; padding: 10px; border: 1px solid #374151; border-radius: 6px; 
+                          background: #1f2937; color: white;" />
+            <button id="aegis-add-new" 
+                    style="padding: 10px 20px; background: #4ade80; color: black; 
+                           border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
+              Add
+            </button>
+          </div>
+        </div>
+        
+        <div style="color: #fbbf24; font-weight: bold; margin-bottom: 10px;">Tracked Addresses (${trackedAddresses.length}):</div>
+        <div id="aegis-management-list" 
+             style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #374151; 
+                    max-height: 300px; overflow-y: auto;">
+          ${trackedAddresses.length === 0 ? 
+            '<div style="color: #9ca3af; text-align: center; padding: 20px;">No addresses tracked yet</div>' :
+            trackedAddresses.map(addr => `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1f2937; border-radius: 6px; margin-bottom: 8px;">
+                <span style="font-family: monospace; color: #e5e5e5; font-size: 12px;">${addr}</span>
+                <button onclick="removeAddress('${addr}')" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;">Remove</button>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(managementPage);
+    
+    // Event listener'ları ekle
+    const closeBtn = document.getElementById('aegis-close-management');
+    const addBtn = document.getElementById('aegis-add-new');
+    const addressInput = document.getElementById('aegis-new-address');
+    
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        managementPage.remove();
+      });
+    }
     
     if (addBtn && addressInput) {
       addBtn.addEventListener('click', () => {
@@ -605,7 +928,7 @@
           // Local state'i güncelle
           trackedAddresses.push(address.toLowerCase());
           addressInput.value = '';
-          updateTrackedAddresses();
+          updateManagementList();
         }
       });
       
@@ -615,6 +938,111 @@
         }
       });
     }
+    
+    // Management listesini güncelle
+    function updateManagementList() {
+      const list = document.getElementById('aegis-management-list');
+      if (list) {
+        list.innerHTML = trackedAddresses.length === 0 ? 
+          '<div style="color: #9ca3af; text-align: center; padding: 20px;">No addresses tracked yet</div>' :
+          trackedAddresses.map(addr => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1f2937; border-radius: 6px; margin-bottom: 8px;">
+              <span style="font-family: monospace; color: #e5e5e5; font-size: 12px;">${addr}</span>
+              <button onclick="removeAddress('${addr}')" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;">Remove</button>
+            </div>
+          `).join('');
+      }
+    }
+  }
+  
+  // Recent Transactions sayfasını göster
+  function showRecentTransactions() {
+    // Mevcut recent transactions sayfasını kaldır
+    const existing = document.getElementById('aegis-recent-transactions-page');
+    if (existing) {
+      existing.remove();
+    }
+    
+    // Yeni sayfa oluştur
+    const transactionsPage = document.createElement('div');
+    transactionsPage.id = 'aegis-recent-transactions-page';
+    transactionsPage.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      background: rgba(0,0,0,0.8) !important;
+      z-index: 999999999 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    `;
+    
+    transactionsPage.innerHTML = `
+      <div style="background: #1a1a1a; border: 2px solid #4ade80; border-radius: 12px; padding: 20px; width: 800px; max-height: 80vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2 style="color: #4ade80; margin: 0;">📊 Recent Transactions (${recentTransactions.length})</h2>
+          <button id="aegis-close-transactions" style="background: #ef4444; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer;">Close</button>
+        </div>
+        
+        <div id="aegis-transactions-list" 
+             style="background: #111827; padding: 15px; border-radius: 6px; border: 1px solid #374151; 
+                    max-height: 500px; overflow-y: auto;">
+          ${recentTransactions.length === 0 ? 
+            '<div style="color: #9ca3af; text-align: center; padding: 40px;">No recent transactions</div>' :
+            recentTransactions.map(tx => {
+              const timeAgo = Math.floor((Date.now() - tx.timestamp) / 1000);
+              const timeStr = timeAgo < 60 ? `${timeAgo}s ago` : `${Math.floor(timeAgo / 60)}m ago`;
+              
+              let details = '';
+              if (tx.type === "Contract Deployment") {
+                details = `Bytecode: ${tx.details.bytecodeLength} bytes`;
+              } else if (tx.type === "ETH Transfer") {
+                const value = parseInt(tx.details.value || '0', 16) / 1e18;
+                details = `Value: ${value.toFixed(4)} ETH`;
+              } else if (tx.type === "Mint") {
+                details = `Mint to: ${short(tx.details.from)} | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+              } else if (tx.type === "Token Transfer") {
+                details = `Transfer | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+              } else if (tx.type === "Token Approval") {
+                details = `Approval | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+              } else if (tx.type === "Set Approval For All") {
+                details = `Set Approval | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+              } else {
+                details = `Method: ${tx.details.method} | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+              }
+              
+              return `
+                <div style="margin-bottom: 15px; padding: 15px; background: #1f2937; border-radius: 8px; border-left: 4px solid #4ade80;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div style="font-weight: bold; color: #4ade80; font-size: 14px;">${tx.type}</div>
+                    <div style="color: #6b7280; font-size: 12px;">${timeStr}</div>
+                  </div>
+                  <div style="color: #d1d5db; font-size: 12px; margin-bottom: 5px; font-family: monospace;">${tx.address}</div>
+                  <div style="color: #9ca3af; font-size: 11px;">${details}</div>
+                </div>
+              `;
+            }).join('')
+          }
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(transactionsPage);
+    
+    // Event listener'ları ekle
+    const closeBtn = document.getElementById('aegis-close-transactions');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        transactionsPage.remove();
+      });
+    }
+  }
+  
+  // Settings sayfasını göster
+  function showSettings() {
+    alert('Settings page coming soon!');
   }
   
   // Dropdown içeriğini güncelle
@@ -647,6 +1075,65 @@
     trackedAddresses = trackedAddresses.filter(addr => addr.toLowerCase() !== address.toLowerCase());
     updateTrackedAddresses();
   };
+  
+  // Recent transaction ekleme fonksiyonu - duplicate önleme ile
+  function addRecentTransaction(tx: any) {
+    // Duplicate kontrolü - aynı ID'ye sahip transaction var mı?
+    const isDuplicate = recentTransactions.some(existing => existing.id === tx.id);
+    
+    if (!isDuplicate) {
+      recentTransactions.unshift(tx);
+      // Son 10 transaction'ı tut
+      if (recentTransactions.length > 10) {
+        recentTransactions = recentTransactions.slice(0, 10);
+      }
+      updateRecentTransactions();
+    } else {
+      console.log("[Aegis/inpage] Duplicate transaction prevented:", tx.id);
+    }
+  }
+  
+  // Recent transactions UI'ını güncelle
+  function updateRecentTransactions() {
+    const container = document.getElementById('aegis-recent-transactions');
+    if (container) {
+      if (recentTransactions.length === 0) {
+        container.innerHTML = '<div style="color: #9ca3af;">No recent transactions</div>';
+      } else {
+        container.innerHTML = recentTransactions.map(tx => {
+          const timeAgo = Math.floor((Date.now() - tx.timestamp) / 1000);
+          const timeStr = timeAgo < 60 ? `${timeAgo}s ago` : `${Math.floor(timeAgo / 60)}m ago`;
+          
+          let details = '';
+          if (tx.type === "Contract Deployment") {
+            details = `Bytecode: ${tx.details.bytecodeLength} bytes`;
+          } else if (tx.type === "ETH Transfer") {
+            const value = parseInt(tx.details.value || '0', 16) / 1e18;
+            details = `Value: ${value.toFixed(4)} ETH`;
+          } else if (tx.type === "Mint") {
+            details = `Mint to: ${short(tx.details.from)} | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+          } else if (tx.type === "Token Transfer") {
+            details = `Transfer | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+          } else if (tx.type === "Token Approval") {
+            details = `Approval | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+          } else if (tx.type === "Set Approval For All") {
+            details = `Set Approval | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+          } else {
+            details = `Method: ${tx.details.method} | Verified: ${tx.details.verified ? '✅' : '❌'}`;
+          }
+          
+          return `
+            <div style="margin-bottom: 8px; padding: 6px; background: #1f2937; border-radius: 4px; border-left: 3px solid #4ade80;">
+              <div style="font-weight: bold; color: #4ade80; font-size: 11px;">${tx.type}</div>
+              <div style="color: #d1d5db; font-size: 10px; margin: 2px 0;">${short(tx.address)}</div>
+              <div style="color: #9ca3af; font-size: 9px;">${details}</div>
+              <div style="color: #6b7280; font-size: 9px; text-align: right;">${timeStr}</div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
   
   // Dropdown'ı göster/gizle
   function toggleDropdown() {

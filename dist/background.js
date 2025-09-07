@@ -16597,7 +16597,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 chrome.action.onClicked.addListener((tab) => {
-  if (tab.id) {
+  if (tab.id && tab.url) {
+    if (tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://") || tab.url.startsWith("moz-extension://")) {
+      console.log("[Aegis/bg] Cannot inject into internal page:", tab.url);
+      return;
+    }
     console.log("[Aegis/bg] Extension icon clicked, sending toggle message");
     chrome.tabs.sendMessage(tab.id, { type: "Aegis/ToggleDropdown" }, (response) => {
       if (chrome.runtime.lastError) {
